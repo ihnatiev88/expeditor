@@ -592,6 +592,22 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
 
                 <div class="admin-section">
                     <div class="admin-section-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        OpenRouteService API
+                    </div>
+                    <div class="admin-info-box" id="ors-status">Не налаштовано — використовується базовий алгоритм</div>
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">
+                        Безкоштовно до 2000 запитів/день. Зареєструйтесь на <b>openrouteservice.org</b> → My Dashboard → API Key
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <input type="password" id="ors-key" placeholder="ORS API ключ"
+                            style="flex:1;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;outline:none;">
+                        <button class="admin-btn" style="flex:0 0 auto;padding:10px 14px" onclick="saveOrsKey()">Зберегти</button>
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <div class="admin-section-title">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
                         Пароль адміністратора
                     </div>
@@ -1514,38 +1530,121 @@ function clearSavedRoute() {
 // ═══════════════════════════════════════════════════════════
 // OPTIMIZE
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ORS API KEY
+// ═══════════════════════════════════════════════════════════
+function getOrsKey() { return localStorage.getItem('orsApiKey') || 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NGNiNjYwYjQ1MjQwNTk5MzFlZGE1OGFiZTM2MWU4IiwiaCI6Im11cm11cjY0In0='; }
+
+function saveOrsKey() {
+    const key = document.getElementById('ors-key').value.trim();
+    if(!key) { toast('Введіть API ключ'); return; }
+    localStorage.setItem('orsApiKey', key);
+    updateOrsStatus();
+    toast('✓ ORS API ключ збережено');
+}
+
+function updateOrsStatus() {
+    const key = getOrsKey();
+    const el = document.getElementById('ors-status');
+    if(!el) return;
+    if(key) {
+        el.innerHTML = '✅ API ключ налаштовано — використовується ORS Vroom';
+        document.getElementById('ors-key').value = key;
+    } else {
+        el.textContent = 'Не налаштовано — використовується базовий алгоритм';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// OPTIMIZE
+// ═══════════════════════════════════════════════════════════
 async function doOptimize() {
     const pending = S.routePoints.filter(p=>p.hasCoords&&!p.done);
     if(pending.length<2) { toast('Недостатньо точок'); return; }
 
-    loading('Оптимізація маршруту...');
+    loading('Визначення позиції...');
+    let startLat, startLng;
     try {
-        let startLat, startLng;
+        const pos = await getPos();
+        startLat=pos.lat; startLng=pos.lng;
+        if(!S.userLat) updateUserPos(startLat,startLng);
+    } catch(e) {
+        startLat = pending.reduce((s,p)=>s+p.lat,0)/pending.length;
+        startLng = pending.reduce((s,p)=>s+p.lng,0)/pending.length;
+        toast('GPS недоступний, оптимізація від центру');
+    }
+
+    const orsKey = getOrsKey();
+    let optimized;
+
+    if(orsKey && navigator.onLine) {
+        loading('Оптимізація через ORS Vroom...');
         try {
-            const pos = await getPos();
-            startLat=pos.lat; startLng=pos.lng;
-            if(!S.userLat) updateUserPos(startLat,startLng);
+            optimized = await orsOptimize(pending, startLat, startLng, orsKey);
+            toast(`✅ ORS: маршрут оптимізовано (${optimized.length} точок)`);
         } catch(e) {
-            startLat = pending.reduce((s,p)=>s+p.lat,0)/pending.length;
-            startLng = pending.reduce((s,p)=>s+p.lng,0)/pending.length;
-            toast('GPS недоступний, оптимізація від центру');
+            console.warn('ORS failed, fallback to NN:', e);
+            toast('⚠️ ORS недоступний — використовую базовий алгоритм');
+            optimized = nnTSP(pending, startLat, startLng);
         }
+    } else {
+        loading('Оптимізація маршруту...');
+        optimized = nnTSP(pending, startLat, startLng);
+        if(!orsKey) toast(`✓ Маршрут оптимізовано (базовий алгоритм)`);
+    }
 
-        // Nearest-neighbor TSP
-        const optimized = nnTSP(pending, startLat, startLng);
-        const done = S.routePoints.filter(p=>!p.hasCoords||p.done);
-        S.routePoints = [...optimized, ...done];
+    const done = S.routePoints.filter(p=>!p.hasCoords||p.done);
+    S.routePoints = [...optimized, ...done];
 
-        renderRouteUI();
-        putMarkersOnMap();
-        saveRouteToStorage();
+    renderRouteUI();
+    putMarkersOnMap();
+    saveRouteToStorage();
+    await drawOptRoute(startLat, startLng, optimized);
+    hideLoading();
+}
 
-        // Draw route
-        await drawOptRoute(startLat, startLng, optimized);
-        toast(`✓ Маршрут оптимізовано: ${optimized.length} точок`);
+// OpenRouteService Optimization (Vroom)
+async function orsOptimize(pts, startLat, startLng, apiKey) {
+    const vehicles = [{
+        id: 1,
+        profile: 'driving-car',
+        start: [startLng, startLat],
+        end:   [startLng, startLat]
+    }];
 
-    } catch(e) { toast('Помилка оптимізації'); console.error(e); }
-    finally { hideLoading(); }
+    const jobs = pts.map((p, i) => ({
+        id: i,
+        location: [p.lng, p.lat]
+    }));
+
+    const body = { vehicles, jobs };
+
+    const r = await fetch('https://api.openrouteservice.org/optimization', {
+        method: 'POST',
+        headers: {
+            'Authorization': apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify(body)
+    });
+
+    if(!r.ok) {
+        const err = await r.text();
+        console.error('ORS error:', r.status, err);
+        throw new Error('ORS ' + r.status);
+    }
+
+    const data = await r.json();
+    const steps = data.routes?.[0]?.steps || [];
+
+    // steps includes start/end, filter only 'job' type
+    const orderedIds = steps
+        .filter(s => s.type === 'job')
+        .map(s => s.job);
+
+    // Return pts in optimized order
+    return orderedIds.map(id => pts[id]);
 }
 
 function nnTSP(pts, sLat, sLng) {
@@ -1731,6 +1830,7 @@ function changePin() {
 
 function updateAdminInfo() {
     updateGHStatus();
+    updateOrsStatus();
     const el = document.getElementById('admin-db-info');
     if(S.dbLoaded) {
         const ts = localStorage.getItem('dbUpdated') || localStorage.getItem('cloudSyncTime') || 'невідомо';
