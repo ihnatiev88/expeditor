@@ -1447,7 +1447,6 @@ function movePoint(i, delta) {
     renderRouteUI();
     putMarkersOnMap();
     saveRouteToStorage();
-    clearLine();
 
     // Scroll moved card into view
     const target = Math.max(0, i + delta);
@@ -1455,6 +1454,8 @@ function movePoint(i, delta) {
         const el = document.getElementById('ri' + target);
         if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
     }, 60);
+
+    rebuildRouteAfterSort();
 }
 
 function initTouchDrag() {} // no-op, kept for compatibility
@@ -1462,7 +1463,7 @@ function initTouchDrag() {} // no-op, kept for compatibility
 function moveToPos(fromIdx, val, inputEl) {
     const toIdx = parseInt(val) - 1; // convert to 0-based
     inputEl.value = '';
-    if(isNaN(toIdx) || toIdx === fromIdx) return;
+    if(isNaN(toIdx) || fromIdx === toIdx) return;
     if(toIdx < 0 || toIdx >= S.routePoints.length) {
         toast(`Номер від 1 до ${S.routePoints.length}`);
         return;
@@ -1474,13 +1475,30 @@ function moveToPos(fromIdx, val, inputEl) {
     renderRouteUI();
     putMarkersOnMap();
     saveRouteToStorage();
-    clearLine();
 
     // Scroll to new position
     setTimeout(() => {
         const el = document.getElementById('ri' + toIdx);
         if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
     }, 60);
+
+    rebuildRouteAfterSort();
+}
+
+// Rebuild route line after manual sort (no re-optimization)
+async function rebuildRouteAfterSort() {
+    const pts = S.routePoints.filter(p => p.hasCoords && !p.done);
+    if(pts.length < 2) { clearLine(); return; }
+
+    let startLat, startLng;
+    try {
+        const pos = await getPos();
+        startLat = pos.lat; startLng = pos.lng;
+    } catch(e) {
+        startLat = pts[0].lat; startLng = pts[0].lng;
+    }
+
+    await drawOptRoute(startLat, startLng, pts);
 }
 
 // ═══════════════════════════════════════════════════════════
