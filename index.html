@@ -249,16 +249,27 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
 .empty svg { width:44px; height:44px; display:block; margin:0 auto 12px; opacity:.3; }
 .empty p { font-size:14px; line-height:1.5; }
 
-/* ── DRAG & DROP ── */
-.drag-handle {
-    width:24px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
-    color:var(--muted); cursor:grab; opacity:.45; touch-action:none;
+/* ── SORT BUTTONS ── */
+.sort-btn {
+    background:var(--surface2) !important; color:var(--muted) !important;
+    border:1px solid var(--border) !important;
+    padding:4px 8px !important; font-size:13px !important; min-width:32px;
 }
-.drag-handle:active { cursor:grabbing; }
-.drag-handle svg { width:16px; height:16px; }
-.rcard { touch-action:none; }
-.rcard.dragging { opacity:.35; border-color:var(--accent); }
-.rcard.drag-over { border-color:var(--accent); border-style:dashed; background:var(--accent-dim); }
+.sort-btn:disabled { opacity:.2; pointer-events:none; }
+.sort-btn:active:not(:disabled) { background:var(--accent) !important; color:#fff !important; }
+.top-btn { font-size:15px !important; }
+.pos-input {
+    width:44px; padding:4px 6px; border-radius:7px;
+    background:var(--surface2); border:1px solid var(--border);
+    color:var(--text); font-size:13px; font-family:'Barlow',sans-serif;
+    text-align:center; outline:none;
+}
+.pos-input:focus { border-color:var(--accent); }
+.pos-input::placeholder { color:var(--muted); font-size:11px; }
+/* hide number input arrows */
+.pos-input::-webkit-inner-spin-button,
+.pos-input::-webkit-outer-spin-button { -webkit-appearance:none; }
+.pos-input[type=number] { -moz-appearance:textfield; }
 
 /* ── INVOICE STYLES ── */
 .rc-inv-row { display:flex; gap:5px; flex-wrap:wrap; margin:4px 0 2px; }
@@ -1319,11 +1330,7 @@ function renderRouteUI() {
 
     setTimeout(initTouchDrag, 100);
     document.getElementById('rlist').innerHTML = S.routePoints.map((p,i) => `
-        <div class="rcard ${p.done?'done':''}" id="ri${i}" draggable="true"
-             ondragstart="dragStart(${i})" ondragover="dragOver(event,${i})" ondrop="dragDrop(event,${i})" ondragend="dragEnd()">
-            <div class="drag-handle" title="Перетягнути">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01"/></svg>
-            </div>
+        <div class="rcard ${p.done?'done':''}" id="ri${i}">
             <div class="rnr ${p.done?'green':(!p.hasCoords?'red':'')}">${p.done?'✓':(i+1)}</div>
             <div class="rcinfo">
                 <div class="rcname">${esc2(p.name)}</div>
@@ -1341,6 +1348,14 @@ function renderRouteUI() {
                         </div>`).join('')}
                 </div>
                 <div class="rcactions">
+                    <button class="abtn sort-btn" onclick="movePoint(${i},-1)" ${i===0?'disabled':''} title="Вгору">▲</button>
+                    <button class="abtn sort-btn" onclick="movePoint(${i},1)" ${i===S.routePoints.length-1?'disabled':''} title="Вниз">▼</button>
+                    <button class="abtn sort-btn top-btn" onclick="movePoint(${i},-${i})" ${i===0?'disabled':''} title="На початок">⇈</button>
+                    <input class="pos-input" type="number" min="1" max="${S.routePoints.length}"
+                        placeholder="${i+1}"
+                        onkeydown="if(event.key==='Enter')moveToPos(${i},this.value,this)"
+                        onblur="if(this.value)moveToPos(${i},this.value,this)"
+                        title="Введіть номер позиції">
                     <button class="abtn nav" onclick="showRoutePoint(${i})">📍 Карта</button>
                     ${p.hasCoords?`<button class="abtn nav" onclick="navTo(${p.lat},${p.lng})">🧭 Маршрут</button>`:''}
                     <button class="abtn done-btn ${p.done?'on':''}" onclick="toggleDone(${i})">${p.done?'✓ Виконано':'Відмітити'}</button>
@@ -1397,100 +1412,59 @@ function putMarkersOnMap() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// DRAG & DROP SORT
+// SORT — button-based (reliable on mobile)
 // ═══════════════════════════════════════════════════════════
-let _dragIdx = null;
+function movePoint(i, delta) {
+    if(delta === 0) return;
+    const j = i + delta;
+    if(j < 0 || j >= S.routePoints.length) return;
 
-function dragStart(i) {
-    _dragIdx = i;
-    setTimeout(() => {
-        const el = document.getElementById('ri'+i);
-        if(el) el.classList.add('dragging');
-    }, 0);
-}
+    if(Math.abs(delta) === 1) {
+        // Swap adjacent
+        [S.routePoints[i], S.routePoints[j]] = [S.routePoints[j], S.routePoints[i]];
+    } else {
+        // Move to top (delta = -i)
+        const item = S.routePoints.splice(i, 1)[0];
+        S.routePoints.unshift(item);
+    }
 
-function dragOver(e, i) {
-    e.preventDefault();
-    document.querySelectorAll('.rcard').forEach(c => c.classList.remove('drag-over'));
-    const el = document.getElementById('ri'+i);
-    if(el && i !== _dragIdx) el.classList.add('drag-over');
-}
-
-function dragDrop(e, i) {
-    e.preventDefault();
-    if(_dragIdx === null || _dragIdx === i) return;
-    // Reorder array
-    const moved = S.routePoints.splice(_dragIdx, 1)[0];
-    S.routePoints.splice(i, 0, moved);
-    _dragIdx = null;
     renderRouteUI();
     putMarkersOnMap();
     saveRouteToStorage();
     clearLine();
+
+    // Scroll moved card into view
+    const target = Math.max(0, i + delta);
+    setTimeout(() => {
+        const el = document.getElementById('ri' + target);
+        if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
+    }, 60);
 }
 
-function dragEnd() {
-    _dragIdx = null;
-    document.querySelectorAll('.rcard').forEach(c => {
-        c.classList.remove('dragging');
-        c.classList.remove('drag-over');
-    });
-}
+function initTouchDrag() {} // no-op, kept for compatibility
 
-// Touch drag support for mobile
-let _touchDragIdx = null, _touchClone = null;
+function moveToPos(fromIdx, val, inputEl) {
+    const toIdx = parseInt(val) - 1; // convert to 0-based
+    inputEl.value = '';
+    if(isNaN(toIdx) || toIdx === fromIdx) return;
+    if(toIdx < 0 || toIdx >= S.routePoints.length) {
+        toast(`Номер від 1 до ${S.routePoints.length}`);
+        return;
+    }
+    // Remove from current, insert at target
+    const item = S.routePoints.splice(fromIdx, 1)[0];
+    S.routePoints.splice(toIdx, 0, item);
 
-function initTouchDrag() {
-    const list = document.getElementById('rlist');
-    if(!list) return;
+    renderRouteUI();
+    putMarkersOnMap();
+    saveRouteToStorage();
+    clearLine();
 
-    list.addEventListener('touchstart', e => {
-        const handle = e.target.closest('.drag-handle');
-        if(!handle) return;
-        const card = handle.closest('.rcard');
-        if(!card) return;
-        const idx = parseInt(card.id.replace('ri',''));
-        _touchDragIdx = idx;
-        card.classList.add('dragging');
-        e.preventDefault();
-    }, {passive: false});
-
-    list.addEventListener('touchmove', e => {
-        if(_touchDragIdx === null) return;
-        e.preventDefault();
-        const touch = e.touches[0];
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        const card = el && el.closest('.rcard');
-        document.querySelectorAll('.rcard').forEach(c => c.classList.remove('drag-over'));
-        if(card) {
-            const targetIdx = parseInt(card.id.replace('ri',''));
-            if(targetIdx !== _touchDragIdx) card.classList.add('drag-over');
-        }
-    }, {passive: false});
-
-    list.addEventListener('touchend', e => {
-        if(_touchDragIdx === null) return;
-        const touch = e.changedTouches[0];
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        const card = el && el.closest('.rcard');
-        if(card) {
-            const targetIdx = parseInt(card.id.replace('ri',''));
-            if(targetIdx !== _touchDragIdx) {
-                const moved = S.routePoints.splice(_touchDragIdx, 1)[0];
-                S.routePoints.splice(targetIdx, 0, moved);
-                renderRouteUI();
-                putMarkersOnMap();
-                saveRouteToStorage();
-                clearLine();
-            }
-        }
-        document.querySelectorAll('.rcard').forEach(c => {
-            c.classList.remove('dragging');
-            c.classList.remove('drag-over');
-        });
-        _touchDragIdx = null;
-        initTouchDrag(); // re-bind after re-render
-    }, {passive: true});
+    // Scroll to new position
+    setTimeout(() => {
+        const el = document.getElementById('ri' + toIdx);
+        if(el) el.scrollIntoView({block:'nearest', behavior:'smooth'});
+    }, 60);
 }
 
 // ═══════════════════════════════════════════════════════════
