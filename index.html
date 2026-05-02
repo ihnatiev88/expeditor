@@ -665,7 +665,7 @@ function collapse(){ S.open=false; document.getElementById('panel').classList.re
     p.addEventListener('touchstart', e => { sy=e.touches[0].clientY; wasOpen=S.open; }, {passive:true});
     p.addEventListener('touchend',   e => {
         const dy = e.changedTouches[0].clientY - sy;
-        if(dy < -30 && !wasOpen) expand();
+        if(dy + 30 < 0 && !wasOpen) expand();
         if(dy >  30 && wasOpen)  collapse();
     }, {passive:true});
 })();
@@ -1737,7 +1737,7 @@ async function testGHConnection() {
         } else {
             toast(`❌ Помилка: ${r.status}`);
         }
-    } catch(e) { toast('❌ Немає з'єднання'); }
+    } catch(e) { toast('❌ Немає з\'єднання'); }
     finally { hideLoading(); }
 }
 
