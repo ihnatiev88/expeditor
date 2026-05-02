@@ -1,0 +1,1820 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Експедитор</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="Експедитор">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="db.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+:root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #263548;
+    --accent: #f97316;
+    --accent-dim: rgba(249,115,22,0.12);
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --border: rgba(255,255,255,0.08);
+    --shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg); color:var(--text); overflow:hidden; user-select:none; }
+
+/* ── MAP ── */
+#map { position:fixed; inset:0; z-index:1; }
+.leaflet-control-attribution, .leaflet-control-zoom { display:none !important; }
+
+/* ── HEADER ── */
+#header {
+    position:fixed; top:0; left:0; right:0; z-index:100;
+    padding:env(safe-area-inset-top,12px) 16px 0;
+    padding-top:max(env(safe-area-inset-top),12px);
+    display:flex; align-items:center; gap:10px;
+    background:linear-gradient(180deg,rgba(15,23,42,.92) 0%,transparent 100%);
+    pointer-events:none;
+}
+
+#logo {
+    pointer-events:all;
+    display:flex; align-items:center; gap:7px;
+    background:var(--accent); color:#fff;
+    padding:7px 13px 7px 9px;
+    border-radius:10px;
+    font-family:'Barlow Condensed',sans-serif;
+    font-weight:700; font-size:16px; letter-spacing:.6px;
+}
+#logo svg { width:18px; height:18px; }
+
+#header-btns { margin-left:auto; display:flex; gap:8px; pointer-events:all; }
+
+.hbtn {
+    width:40px; height:40px; border-radius:50%;
+    background:rgba(30,41,59,.85); border:1px solid var(--border);
+    color:var(--text); display:flex; align-items:center; justify-content:center;
+    cursor:pointer; backdrop-filter:blur(8px); transition:all .2s;
+}
+.hbtn:active { transform:scale(.93); }
+.hbtn.on { background:var(--accent); border-color:var(--accent); }
+.hbtn svg { width:18px; height:18px; }
+
+/* ── BOTTOM PANEL ── */
+#panel {
+    position:fixed; bottom:0; left:0; right:0; z-index:100;
+    background:var(--bg);
+    border-radius:20px 20px 0 0;
+    border-top:1px solid var(--border);
+    transform:translateY(calc(100% - 150px));
+    transition:transform .35s cubic-bezier(.4,0,.2,1);
+    max-height:88vh; display:flex; flex-direction:column;
+    padding-bottom:env(safe-area-inset-bottom,0);
+}
+#panel.open { transform:translateY(0); }
+
+#handle {
+    width:36px; height:4px; background:var(--muted); border-radius:2px;
+    margin:10px auto 0; opacity:.35; cursor:pointer; flex-shrink:0;
+}
+
+/* ── TABS ── */
+#tabs { display:flex; padding:10px 16px 0; gap:0; flex-shrink:0; }
+
+.tab {
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:9px 6px; cursor:pointer;
+    font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:14px;
+    letter-spacing:.4px; color:var(--muted);
+    border-bottom:2px solid transparent; transition:all .2s;
+    border-radius:8px 8px 0 0;
+}
+.tab.on { color:var(--accent); border-bottom-color:var(--accent); background:var(--accent-dim); }
+.tab svg { width:15px; height:15px; }
+
+/* ── PANEL CONTENT ── */
+#pcontent {
+    flex:1; overflow-y:auto; padding:12px 16px 20px;
+    overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
+}
+::-webkit-scrollbar { width:0; }
+
+/* ── DB BAR ── */
+#dbbar {
+    display:flex; align-items:center; gap:10px;
+    background:var(--surface); border-radius:12px; padding:11px 13px;
+    margin-bottom:10px; border-left:3px solid var(--border);
+    transition:border-color .3s;
+}
+#dbbar.ok { border-left-color:var(--success); }
+#dbbar svg { width:32px; height:32px; color:var(--accent); flex-shrink:0; }
+#db-info { flex:1; min-width:0; }
+#db-status { font-size:13px; font-weight:600; }
+#db-count { font-size:11px; color:var(--muted); }
+#db-btn {
+    padding:6px 12px; background:var(--accent); color:#fff; border:none;
+    border-radius:8px; font-family:'Barlow Condensed',sans-serif;
+    font-weight:600; font-size:12px; cursor:pointer; white-space:nowrap;
+    flex-shrink:0;
+}
+#db-file { display:none; }
+
+/* ── SEARCH BOX ── */
+#sbox { position:relative; margin-bottom:8px; }
+#sinput {
+    width:100%; padding:11px 42px 11px 14px;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; color:var(--text); font-size:15px;
+    font-family:'Barlow',sans-serif; outline:none; transition:border-color .2s;
+}
+#sinput:focus { border-color:var(--accent); }
+#sinput::placeholder { color:var(--muted); }
+#sico { position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
+#sico svg { width:17px; height:17px; }
+
+/* ── SEARCH TYPE PILLS ── */
+#stypes { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+.spill {
+    padding:5px 11px; border-radius:20px; font-size:12px;
+    font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.3px;
+    background:var(--surface); color:var(--muted); border:1px solid var(--border);
+    cursor:pointer; transition:all .2s;
+}
+.spill.on { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+
+/* ── NOMINATIM DROPDOWN ── */
+#nom-drop {
+    position:absolute; left:0; right:0; top:calc(100% + 4px);
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; z-index:200; overflow:hidden;
+    box-shadow:var(--shadow); display:none;
+}
+.nom-row { padding:9px 13px; cursor:pointer; border-bottom:1px solid var(--border); transition:background .15s; }
+.nom-row:last-child { border-bottom:none; }
+.nom-row:active { background:var(--surface2); }
+.nom-main { font-size:13px; font-weight:500; }
+.nom-sub { font-size:11px; color:var(--muted); margin-top:1px; }
+
+/* ── RESULT / ROUTE ITEMS ── */
+#results, #rlist { display:flex; flex-direction:column; gap:6px; }
+
+.rcard {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:11px 13px;
+    display:flex; gap:10px; cursor:pointer; transition:background .2s;
+}
+.rcard:active { background:var(--surface2); }
+.rcard.done { opacity:.45; }
+
+.rnr {
+    width:26px; height:26px; border-radius:50%; flex-shrink:0;
+    background:var(--accent); color:#fff;
+    font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px;
+    display:flex; align-items:center; justify-content:center;
+}
+.rnr.green { background:var(--success); }
+.rnr.red   { background:var(--danger); }
+
+.rcinfo { flex:1; min-width:0; }
+.rcname { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
+.rcaddr { font-size:14px; font-weight:500; line-height:1.3; color:var(--text); }
+.rcbadge {
+    display:inline-block; font-size:10px; padding:2px 7px; border-radius:5px;
+    font-family:'Barlow Condensed',sans-serif; font-weight:600;
+    background:var(--accent-dim); color:var(--accent); margin-top:3px;
+}
+.rcbadge.red { background:rgba(239,68,68,.12); color:var(--danger); }
+.rcwt { font-size:11px; color:var(--muted); margin-top:2px; }
+
+.rcactions { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+.abtn {
+    padding:5px 10px; border-radius:7px; border:none; cursor:pointer;
+    font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:12px;
+    transition:all .2s;
+}
+.abtn.nav { background:var(--accent); color:#fff; }
+.abtn.done-btn { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
+.abtn.done-btn.on { background:rgba(34,197,94,.12); color:var(--success); border-color:var(--success); }
+
+/* ── ROUTE HEADER ── */
+#rinfo {
+    background:var(--surface); border-radius:12px; padding:12px 13px;
+    margin-bottom:10px; display:none;
+}
+#rmeta { font-size:12px; color:var(--muted); margin-bottom:2px; }
+#rtitle { font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:700; margin-bottom:8px; }
+#rstats { display:flex; gap:14px; flex-wrap:wrap; }
+.rstat { font-size:12px; color:var(--muted); }
+.rstat b { color:var(--accent); }
+
+/* ── OPTIMIZE BTN ── */
+#optbtn {
+    display:none; width:100%; padding:13px; margin-bottom:10px;
+    background:var(--accent); color:#fff; border:none; border-radius:12px;
+    font-family:'Barlow Condensed',sans-serif; font-size:16px; font-weight:700;
+    letter-spacing:.5px; cursor:pointer;
+    display:none; align-items:center; justify-content:center; gap:8px;
+    transition:opacity .2s;
+}
+#optbtn:active { opacity:.8; }
+#optbtn svg { width:18px; height:18px; }
+
+/* ── UPLOAD ZONE ── */
+#upzone {
+    border:2px dashed var(--border); border-radius:16px;
+    padding:36px 20px; text-align:center; cursor:pointer;
+    transition:all .2s; margin-bottom:10px;
+}
+#upzone:active, #upzone.drag { border-color:var(--accent); background:var(--accent-dim); }
+#upzone svg { width:40px; height:40px; color:var(--accent); display:block; margin:0 auto 10px; }
+#upzone h3 { font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:700; margin-bottom:4px; }
+#upzone p { font-size:13px; color:var(--muted); }
+#rfile { display:none; }
+
+/* ── EMPTY STATE ── */
+.empty { text-align:center; padding:36px 20px; color:var(--muted); }
+.empty svg { width:44px; height:44px; display:block; margin:0 auto 12px; opacity:.3; }
+.empty p { font-size:14px; line-height:1.5; }
+
+/* ── INVOICE STYLES ── */
+.rc-inv-row { display:flex; gap:5px; flex-wrap:wrap; margin:4px 0 2px; }
+.inv-pill {
+    font-size:11px; padding:2px 8px; border-radius:20px;
+    font-family:'Barlow Condensed',sans-serif; font-weight:600;
+    background:var(--accent-dim); color:var(--accent);
+    border:1px solid rgba(249,115,22,.2);
+}
+.inv-pill.red { background:rgba(239,68,68,.12); color:var(--danger); border-color:rgba(239,68,68,.2); }
+.inv-pill.yellow { background:rgba(234,179,8,.12); color:#eab308; border-color:rgba(234,179,8,.2); }
+
+.inv-list {
+    margin:5px 0 3px; padding:6px 8px;
+    background:rgba(255,255,255,.03); border-radius:8px;
+    border:1px solid var(--border); display:flex; flex-direction:column; gap:3px;
+}
+.inv-item {
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:11px; padding:1px 0;
+}
+.inv-ttn { color:var(--muted); font-family:'Barlow Condensed',sans-serif; letter-spacing:.2px; }
+.inv-wt  { color:var(--text); font-weight:600; }
+
+/* popup invoice */
+.ppop-inv { margin:6px 0 8px; padding:6px 8px; background:rgba(255,255,255,.04); border-radius:8px; }
+.ppop-inv-title { font-size:11px; color:var(--accent); font-family:'Barlow Condensed',sans-serif; font-weight:700; margin-bottom:4px; }
+.ppop-inv-row { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); padding:1px 0; }
+.ppop-inv-row span:last-child { color:var(--text); font-weight:600; }
+.leaflet-popup-content-wrapper {
+    background:var(--surface) !important; color:var(--text) !important;
+    border:1px solid var(--border) !important; border-radius:14px !important;
+    box-shadow:var(--shadow) !important; padding:0 !important;
+}
+.leaflet-popup-content { margin:0 !important; width:auto !important; }
+.leaflet-popup-tip-container { display:none; }
+.leaflet-popup-close-button { color:var(--muted) !important; font-size:18px !important; top:8px !important; right:8px !important; }
+
+.ppop { padding:14px; min-width:200px; max-width:270px; }
+.ppop-name { font-size:12px; color:var(--muted); margin-bottom:3px; }
+.ppop-addr { font-size:14px; font-weight:600; line-height:1.35; margin-bottom:10px; }
+.ppop-btns { display:flex; gap:6px; }
+.ppop-btn {
+    flex:1; padding:9px 6px; border:none; border-radius:9px; cursor:pointer;
+    font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; gap:5px; transition:opacity .2s;
+}
+.ppop-btn:active { opacity:.8; }
+.ppop-btn.main { background:var(--accent); color:#fff; }
+.ppop-btn.sec { background:var(--surface2); color:var(--text); }
+
+/* ── LOADING ── */
+#loading {
+    position:fixed; inset:0; background:rgba(15,23,42,.88);
+    z-index:1000; display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:14px; backdrop-filter:blur(4px);
+}
+#loading.on { display:flex; }
+.spin {
+    width:40px; height:40px; border:3px solid var(--border);
+    border-top-color:var(--accent); border-radius:50%;
+    animation:spin .75s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+#ltxt { font-size:14px; color:var(--muted); }
+
+/* ── TOAST ── */
+#toast {
+    position:fixed; bottom:170px; left:50%;
+    transform:translateX(-50%) translateY(10px);
+    background:var(--surface2); border:1px solid var(--border);
+    color:var(--text); padding:9px 18px; border-radius:30px;
+    font-size:13px; z-index:500; opacity:0; pointer-events:none;
+    transition:all .3s; white-space:nowrap; max-width:90vw;
+    overflow:hidden; text-overflow:ellipsis;
+}
+#toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ── OFFLINE BANNER ── */
+#offline {
+    position:fixed; top:0; left:0; right:0; z-index:200;
+    background:#7c3aed; color:#fff; text-align:center;
+    font-size:12px; font-family:'Barlow Condensed',sans-serif; font-weight:600;
+    padding:4px; display:none; letter-spacing:.4px;
+}
+#offline.on { display:block; }
+
+/* ── ADMIN ── */
+.admin-logo { text-align:center; color:var(--accent); margin-bottom:12px; }
+.admin-title { font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:700; text-align:center; margin-bottom:4px; }
+.admin-sub { font-size:13px; color:var(--muted); text-align:center; margin-bottom:20px; }
+
+.pin-row { display:flex; justify-content:center; gap:12px; margin-bottom:8px; }
+.pin-dot {
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid var(--muted); background:transparent; transition:all .15s;
+}
+.pin-dot.filled { background:var(--accent); border-color:var(--accent); }
+.pin-err { text-align:center; color:var(--danger); font-size:13px; margin-bottom:8px; }
+
+.pin-grid {
+    display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+    max-width:280px; margin:12px auto 0;
+}
+.pin-btn {
+    padding:16px; border-radius:14px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text);
+    font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:600;
+    cursor:pointer; transition:all .15s; text-align:center;
+}
+.pin-btn:active { background:var(--accent); border-color:var(--accent); color:#fff; transform:scale(.94); }
+.pin-clr { color:var(--danger); }
+.pin-ok  { color:var(--success); }
+
+.admin-section {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:14px; margin-bottom:12px;
+}
+.admin-section-title {
+    display:flex; align-items:center; gap:7px;
+    font-family:'Barlow Condensed',sans-serif; font-size:15px; font-weight:700;
+    letter-spacing:.4px; margin-bottom:10px; color:var(--muted);
+}
+.admin-info-box {
+    font-size:13px; color:var(--text); background:var(--surface2);
+    border-radius:9px; padding:9px 12px; margin-bottom:10px; line-height:1.5;
+}
+.admin-btn {
+    width:100%; padding:12px; border-radius:10px; border:none;
+    background:var(--accent); color:#fff; cursor:pointer;
+    font-family:'Barlow Condensed',sans-serif; font-size:15px; font-weight:700;
+    letter-spacing:.4px; display:flex; align-items:center; justify-content:center;
+    gap:7px; transition:opacity .2s;
+}
+.admin-btn:active { opacity:.8; }
+.admin-btn.danger { background:var(--surface2); color:var(--danger); border:1px solid rgba(239,68,68,.3); }
+
+.progress-bar { height:6px; background:var(--surface2); border-radius:3px; margin-top:10px; overflow:hidden; }
+.progress-fill { height:100%; background:var(--accent); border-radius:3px; width:0%; transition:width .3s; }
+.progress-txt { font-size:12px; color:var(--muted); margin-top:6px; text-align:center; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="offline">⚡ ОФЛАЙН РЕЖИМ</div>
+
+<!-- HEADER -->
+<div id="header">
+    <div id="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+        </svg>
+        ЕКСПЕДИТОР
+    </div>
+    <div id="header-btns">
+        <button class="hbtn" id="gpsbtn" onclick="toggleGPS()" title="GPS">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            </svg>
+        </button>
+        <button class="hbtn" id="clearbtn" onclick="clearMap()" title="Очистити карту">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<!-- PANEL -->
+<div id="panel">
+    <div id="handle" onclick="togglePanel()"></div>
+
+    <div id="tabs">
+        <div class="tab on" id="t-search" onclick="switchTab('search')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            ПОШУК
+        </div>
+        <div class="tab" id="t-route" onclick="switchTab('route')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+            МАРШРУТ
+        </div>
+        <div class="tab" id="t-admin" onclick="switchTab('admin')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+            АДМІН
+        </div>
+    </div>
+
+    <div id="pcontent">
+
+        <!-- SEARCH TAB -->
+        <div id="tab-search">
+
+            <div id="dbbar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                </svg>
+                <div id="db-info">
+                    <div id="db-status">Завантаження бази...</div>
+                    <div id="db-count">Зачекайте</div>
+                </div>
+            </div>
+
+            <div id="sbox">
+                <input type="text" id="sinput" placeholder="Пошук клієнта або адреси..." oninput="onSearch(this.value)" autocomplete="off" autocorrect="off" spellcheck="false" autocapitalize="off">
+                <span id="sico">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                </span>
+                <div id="nom-drop"></div>
+            </div>
+
+            <div id="stypes">
+                <button class="spill on" id="sp-client" onclick="setSearchType('client')">👤 Клієнт</button>
+                <button class="spill" id="sp-address" onclick="setSearchType('address')">📍 Адреса</button>
+                <button class="spill" id="sp-street" onclick="setSearchType('street')">🗺️ Вулиця</button>
+            </div>
+
+            <div id="results">
+                <div class="empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                    <p>Введіть назву клієнта<br>або адресу для пошуку</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ROUTE TAB -->
+        <div id="tab-route" style="display:none">
+
+            <div id="rinfo">
+                <div id="rmeta"></div>
+                <div id="rtitle"></div>
+                <div id="rstats">
+                    <div class="rstat">Точок: <b id="s-total">0</b></div>
+                    <div class="rstat">Накладних: <b id="s-inv">0</b></div>
+                    <div class="rstat">Виконано: <b id="s-done">0</b></div>
+                    <div class="rstat">Без координат: <b id="s-nc">0</b></div>
+                </div>
+            </div>
+
+            <button id="optbtn" onclick="doOptimize()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                ОПТИМІЗУВАТИ МАРШРУТ
+            </button>
+
+            <div id="upzone" onclick="document.getElementById('rfile').click()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <h3>Завантажити маршрутний лист</h3>
+                <p>Натисніть або перетягніть<br>.xls / .xlsx файл</p>
+                <input type="file" id="rfile" accept=".xlsx,.xls" onchange="loadRoute(this)">
+            </div>
+
+            <div id="rlist"></div>
+        </div>
+
+
+        <!-- ADMIN TAB -->
+        <div id="tab-admin" style="display:none">
+            <div id="admin-lock">
+                <div class="admin-logo">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                </div>
+                <div class="admin-title">Панель адміністратора</div>
+                <div class="admin-sub">Введіть пароль для доступу</div>
+                <div class="pin-row" id="pin-display">
+                    <span class="pin-dot" id="pd0"></span>
+                    <span class="pin-dot" id="pd1"></span>
+                    <span class="pin-dot" id="pd2"></span>
+                    <span class="pin-dot" id="pd3"></span>
+                </div>
+                <div id="pin-err" class="pin-err" style="display:none">Невірний пароль</div>
+                <div class="pin-grid">
+                    <button class="pin-btn" onclick="pinTap(1)">1</button>
+                    <button class="pin-btn" onclick="pinTap(2)">2</button>
+                    <button class="pin-btn" onclick="pinTap(3)">3</button>
+                    <button class="pin-btn" onclick="pinTap(4)">4</button>
+                    <button class="pin-btn" onclick="pinTap(5)">5</button>
+                    <button class="pin-btn" onclick="pinTap(6)">6</button>
+                    <button class="pin-btn" onclick="pinTap(7)">7</button>
+                    <button class="pin-btn" onclick="pinTap(8)">8</button>
+                    <button class="pin-btn" onclick="pinTap(9)">9</button>
+                    <button class="pin-btn pin-clr" onclick="pinClear()">✕</button>
+                    <button class="pin-btn" onclick="pinTap(0)">0</button>
+                    <button class="pin-btn pin-ok" onclick="pinSubmit()">✓</button>
+                </div>
+            </div>
+
+            <div id="admin-panel" style="display:none">
+                <div class="admin-section">
+                    <div class="admin-section-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                        База клієнтів
+                    </div>
+                    <div id="admin-db-info" class="admin-info-box"></div>
+                    <button class="admin-btn" onclick="document.getElementById('admin-db-file').click()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                        1. Завантажити новий Excel
+                    </button>
+                    <input type="file" id="admin-db-file" accept=".xlsx,.xls" style="display:none" onchange="adminUpdateDB(this)">
+                    <button class="admin-btn" id="dl-db-btn" onclick="downloadDbJs()" style="margin-top:8px;display:none;background:var(--surface2);color:var(--text);border:1px solid var(--border)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        2. Скачати db.js і замінити на сайті
+                    </button>
+                    <div id="dl-hint" style="display:none;font-size:12px;color:var(--muted);margin-top:8px;padding:8px;background:var(--surface2);border-radius:8px;line-height:1.6">
+                        Netlify: зайдіть на <b>app.netlify.com</b> → ваш сайт → <b>Deploys</b> → перетягніть папку з новим <b>db.js</b>
+                    </div>
+                    <div id="admin-db-progress" style="display:none">
+                        <div class="progress-bar"><div class="progress-fill" id="prog-fill"></div></div>
+                        <div class="progress-txt" id="prog-txt">Обробка...</div>
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <div class="admin-section-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                        Пароль адміністратора
+                    </div>
+                    <div class="admin-info-box" id="admin-pin-info">Поточний PIN: ••••</div>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                        <input type="password" id="new-pin" placeholder="Новий PIN (4 цифри)"
+                            maxlength="4" pattern="[0-9]{4}"
+                            style="flex:1;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:15px;outline:none;">
+                        <button class="admin-btn" style="flex:0 0 auto;padding:10px 16px" onclick="changePin()">Змінити</button>
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <div class="admin-section-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+                        GitHub автодеплой
+                    </div>
+                    <div class="admin-info-box" id="gh-status">Не налаштовано</div>
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+                        Після збереження — при оновленні бази <b>db.js</b> автоматично оновиться в GitHub і Netlify задеплоїть за ~30 сек
+                    </div>
+                    <input type="text" id="gh-owner" placeholder="GitHub логін (напр. mycompany)"
+                        style="width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px;box-sizing:border-box">
+                    <input type="text" id="gh-repo" placeholder="Назва репозиторію (напр. expeditor)"
+                        style="width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px;box-sizing:border-box">
+                    <input type="password" id="gh-token" placeholder="GitHub Token (ghp_...)"
+                        style="width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px;box-sizing:border-box">
+                    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+                        Токен: github.com → Settings → Developer settings → Personal access tokens → Fine-grained → дозволи: <b>Contents: Read and Write</b>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button class="admin-btn" style="flex:1" onclick="saveGHSettings()">Зберегти</button>
+                        <button class="admin-btn" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border)" onclick="testGHConnection()">Перевірити</button>
+                    </div>
+                </div>
+
+                <button class="admin-btn danger" onclick="adminLogout()" style="margin-top:4px">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                    Вийти з адмін-панелі
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="loading"><div class="spin"></div><div id="ltxt">Завантаження...</div></div>
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+const S = {
+    lastResults: [],
+    map: null,
+    userMarker: null,
+    userLat: null, userLng: null,
+    gpsWatch: null,
+    db: [],
+    dbLoaded: false,
+    routePoints: [],
+    routeMarkers: [],
+    routeLine: null,
+    searchMarker: null,
+    tab: 'search',
+    stype: 'client',
+    open: false,
+    rInfo: {}
+};
+
+// ═══════════════════════════════════════════════════════════
+// MAP
+// ═══════════════════════════════════════════════════════════
+function initMap() {
+    S.map = L.map('map', { center:[46.4825, 30.7233], zoom:13, zoomControl:false });
+
+    const tile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom:19, attribution:''
+    });
+    tile.addTo(S.map);
+
+    S.map.on('click', () => { if(S.open) collapse(); });
+}
+
+// ═══════════════════════════════════════════════════════════
+// PANEL
+// ═══════════════════════════════════════════════════════════
+function togglePanel() { S.open ? collapse() : expand(); }
+function expand()  { S.open=true;  document.getElementById('panel').classList.add('open'); }
+function collapse(){ S.open=false; document.getElementById('panel').classList.remove('open'); }
+
+// Swipe gesture
+;(function(){
+    const p = document.getElementById('panel');
+    let sy=0, wasOpen=false;
+    p.addEventListener('touchstart', e => { sy=e.touches[0].clientY; wasOpen=S.open; }, {passive:true});
+    p.addEventListener('touchend',   e => {
+        const dy = e.changedTouches[0].clientY - sy;
+        if(dy < -30 && !wasOpen) expand();
+        if(dy >  30 && wasOpen)  collapse();
+    }, {passive:true});
+})();
+
+// ═══════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════
+function switchTab(t) {
+    S.tab = t;
+    document.getElementById('t-search').classList.toggle('on', t==='search');
+    document.getElementById('t-route').classList.toggle('on', t==='route');
+    document.getElementById('t-admin').classList.toggle('on', t==='admin');
+    document.getElementById('tab-search').style.display = t==='search'?'block':'none';
+    document.getElementById('tab-route').style.display  = t==='route'?'block':'none';
+    document.getElementById('tab-admin').style.display  = t==='admin'?'block':'none';
+    expand();
+}
+
+// ═══════════════════════════════════════════════════════════
+// GPS
+// ═══════════════════════════════════════════════════════════
+function toggleGPS() {
+    const btn = document.getElementById('gpsbtn');
+    if(S.gpsWatch) {
+        navigator.geolocation.clearWatch(S.gpsWatch);
+        S.gpsWatch = null;
+        btn.classList.remove('on');
+        if(S.userMarker) { S.map.removeLayer(S.userMarker); S.userMarker=null; }
+        S.userLat = S.userLng = null;
+        return;
+    }
+    if(!navigator.geolocation) { toast('GPS недоступний'); return; }
+    btn.classList.add('on');
+    toast('Визначення місцезнаходження...');
+    S.gpsWatch = navigator.geolocation.watchPosition(
+        p => updateUserPos(p.coords.latitude, p.coords.longitude),
+        () => { btn.classList.remove('on'); S.gpsWatch=null; toast('Не вдалося отримати GPS'); },
+        { enableHighAccuracy:true, maximumAge:5000 }
+    );
+}
+
+function updateUserPos(lat, lng) {
+    S.userLat=lat; S.userLng=lng;
+    const icon = L.divIcon({
+        html:`<div style="width:16px;height:16px;background:#f97316;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 4px rgba(249,115,22,.25)"></div>`,
+        iconSize:[16,16], iconAnchor:[8,8], className:''
+    });
+    if(S.userMarker) S.userMarker.setLatLng([lat,lng]);
+    else {
+        S.userMarker = L.marker([lat,lng],{icon,zIndexOffset:1000}).addTo(S.map);
+        S.map.setView([lat,lng],14);
+    }
+}
+
+function getPos() {
+    return new Promise((res,rej) => {
+        if(S.userLat) { res({lat:S.userLat,lng:S.userLng}); return; }
+        if(!navigator.geolocation) { rej(); return; }
+        navigator.geolocation.getCurrentPosition(
+            p => res({lat:p.coords.latitude, lng:p.coords.longitude}),
+            rej, {enableHighAccuracy:true, timeout:8000}
+        );
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATABASE — INDEXEDDB
+// ═══════════════════════════════════════════════════════════
+function openIDB() {
+    return new Promise((res,rej) => {
+        const r = indexedDB.open('expeditor',2);
+        r.onupgradeneeded = e => {
+            const db = e.target.result;
+            if(!db.objectStoreNames.contains('pts')) db.createObjectStore('pts',{keyPath:'id',autoIncrement:true});
+        };
+        r.onsuccess = e => res(e.target.result);
+        r.onerror   = () => rej(r.error);
+    });
+}
+
+async function saveIDB(pts) {
+    const db = await openIDB();
+    return new Promise((res,rej) => {
+        const tx = db.transaction('pts','readwrite');
+        const st = tx.objectStore('pts');
+        st.clear();
+        pts.forEach(p => st.add(p));
+        tx.oncomplete = res;
+        tx.onerror    = () => rej(tx.error);
+    });
+}
+
+async function loadIDB() {
+    try {
+        const db = await openIDB();
+        return new Promise((res,rej) => {
+            const tx = db.transaction('pts','readonly');
+            const req = tx.objectStore('pts').getAll();
+            req.onsuccess = () => res(req.result);
+            req.onerror   = () => rej(req.error);
+        });
+    } catch(e) { return []; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD DATABASE (Excel with geocodes)
+// ═══════════════════════════════════════════════════════════
+async function loadDB(input) {
+    const file = input.files[0]; if(!file) return;
+    loading('Читання бази...');
+    try {
+        const rows = await readXLS(file);
+        const pts = [];
+        for(const r of rows) {
+            if(r[0] && r[1] && r[2] && r[3]) {
+                const lat=parseFloat(r[2]), lng=parseFloat(r[3]);
+                if(!isNaN(lat)&&!isNaN(lng))
+                    pts.push({ name:String(r[0]).trim(), address:String(r[1]).trim(), lat, lng });
+            }
+        }
+        S.db = pts; S.dbLoaded = true;
+        loading('Збереження у кеш...');
+        await saveIDB(pts);
+        updateDBUI();
+        toast(`✓ База: ${pts.length} точок`);
+    } catch(e) { toast('Помилка читання бази'); console.error(e); }
+    finally { hideLoading(); input.value=''; }
+}
+
+function updateDBUI() {
+    document.getElementById('db-status').textContent = S.dbLoaded ? '✓ База клієнтів завантажена' : 'База не завантажена';
+    document.getElementById('db-count').textContent  = S.dbLoaded ? `${S.db.length} точок клієнтів` : 'Помилка завантаження';
+    document.getElementById('dbbar').classList.toggle('ok', S.dbLoaded);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════
+function setSearchType(t) {
+    S.stype = t;
+    ['client','address','street'].forEach(x => document.getElementById('sp-'+x).classList.toggle('on', x===t));
+    const ph = { client:'Пошук за назвою клієнта...', address:'Пошук за адресою...', street:'Пошук вулиці на карті...' };
+    document.getElementById('sinput').placeholder = ph[t];
+    document.getElementById('nom-drop').style.display = 'none';
+    onSearch(document.getElementById('sinput').value);
+}
+
+let stimer = null;
+function onSearch(q) {
+    q = q.trim();
+    if(S.stype === 'street') {
+        clearTimeout(stimer);
+        document.getElementById('nom-drop').style.display = 'none';
+        if(q.length >= 3) stimer = setTimeout(() => nomSearch(q), 500);
+        return;
+    }
+    if(!S.dbLoaded || q.length < 2) {
+        document.getElementById('results').innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><p>${S.dbLoaded?'Введіть мінімум 2 символи':'Спочатку завантажте базу'}</p></div>`;
+        return;
+    }
+    const ql = q.toLowerCase();
+    const res = (S.stype==='client'
+        ? S.db.filter(p => p.name.toLowerCase().includes(ql))
+        : S.db.filter(p => p.address.toLowerCase().includes(ql))
+    ).slice(0,40);
+    renderResults(res);
+}
+
+function renderResults(res) {
+    const el = document.getElementById('results');
+    if(!res.length) { el.innerHTML=`<div class="empty"><p>Нічого не знайдено</p></div>`; return; }
+    // Store results globally for safe index-based onclick (avoids double-quote HTML bug)
+    S.lastResults = res;
+    el.innerHTML = res.map((r,i) => `
+        <div class="rcard" onclick="showSearchResult(${i})">
+            <div class="rnr">${i+1}</div>
+            <div class="rcinfo">
+                <div class="rcname">${esc2(r.name)}</div>
+                <div class="rcaddr">${esc2(r.address)}</div>
+            </div>
+        </div>`).join('');
+}
+
+function showSearchResult(i) {
+    const r = S.lastResults && S.lastResults[i];
+    if(!r) return;
+    showPt(r.lat, r.lng, r.name, r.address, []);
+}
+
+// Nominatim street search
+async function nomSearch(q) {
+    try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q+', Одеса')}&format=json&limit=6&accept-language=uk`;
+        const data = await (await fetch(url)).json();
+        const drop = document.getElementById('nom-drop');
+        if(!data.length) { drop.style.display='none'; return; }
+        drop.innerHTML = data.map(d => `
+            <div class="nom-row" onclick="goNom(${d.lat},${d.lon},${esc(d.display_name)})">
+                <div class="nom-main">${d.display_name.split(',')[0]}</div>
+                <div class="nom-sub">${d.display_name.split(',').slice(1,3).join(',')}</div>
+            </div>`).join('');
+        drop.style.display = 'block';
+    } catch(e) { toast('Пошук вулиць — тільки онлайн'); }
+}
+
+function goNom(lat, lng, name) {
+    document.getElementById('nom-drop').style.display = 'none';
+    showPt(lat, lng, 'Вулиця', name, []);
+}
+
+// Show route point by index (handles missing coords via geocoding)
+async function showRoutePoint(i) {
+    const p = S.routePoints[i];
+    if(!p) return;
+    await showPt(p.lat, p.lng, p.name, p.address, p.invoices||[], p.addrRaw||'');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHOW POINT ON MAP
+// ═══════════════════════════════════════════════════════════
+async function showPt(lat, lng, name, address, invoices) {
+    lat = parseFloat(lat);
+    lng = parseFloat(lng);
+
+    // No coords — try geocode via Nominatim
+    if (isNaN(lat) || isNaN(lng)) {
+        toast('Шукаємо адресу на карті...');
+        // Use addrRaw if available (from route point) for better context
+        const geoQuery = arguments[5] ? buildGeoQuery(arguments[5]) : address + ', Україна';
+        const coords = await geocodeAddr(geoQuery);
+        if (!coords) { toast('Адресу не знайдено. Перевірте підключення до інтернету.'); return; }
+        lat = coords.lat; lng = coords.lng;
+    }
+
+    if(S.searchMarker) S.map.removeLayer(S.searchMarker);
+    S.searchMarker = L.marker([lat,lng], { icon: pinIcon('#f97316','★'), zIndexOffset:500 }).addTo(S.map);
+    S.searchMarker.bindPopup(mkPopup(name, address, lat, lng, invoices||[])).openPopup();
+    S.map.setView([lat,lng], 16);
+    collapse();
+}
+
+function mkPopup(name, address, lat, lng, invoices) {
+    const invHtml = invoices && invoices.length
+        ? `<div class="ppop-inv">
+            <div class="ppop-inv-title">📦 ${invoices.length} накладних • ${invoices.reduce((s,v)=>s+v.weight,0).toFixed(1)} кг</div>
+            ${invoices.map(inv=>`<div class="ppop-inv-row"><span>${esc2(inv.ttn||'—')}</span><span>${inv.weight?inv.weight.toFixed(1)+' кг':''}</span></div>`).join('')}
+           </div>`
+        : '';
+    return L.popup({ closeButton:true, maxWidth:290, className:'' })
+        .setContent(`<div class="ppop">
+            <div class="ppop-name">${esc2(name)}</div>
+            <div class="ppop-addr">${esc2(address)}</div>
+            ${invHtml}
+            <div class="ppop-btns">
+                <button class="ppop-btn main" onclick="navTo(${lat},${lng})">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+                    Маршрут
+                </button>
+                <button class="ppop-btn sec" onclick="extNav(${lat},${lng})">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                    Google Maps
+                </button>
+            </div>
+        </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════
+async function navTo(lat, lng) {
+    loading('Прокладання маршруту...');
+    try {
+        let pos;
+        try { pos = await getPos(); } catch(e) { extNav(lat,lng); hideLoading(); return; }
+        if(!S.userLat) updateUserPos(pos.lat, pos.lng);
+        await drawOSRM([[pos.lat,pos.lng],[lat,lng]]);
+    } catch(e) {
+        // straight line fallback
+        drawStraight([[S.userLat||lat, S.userLng||lng],[lat,lng]]);
+    } finally { hideLoading(); }
+}
+
+function extNav(lat, lng) {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,'_blank');
+}
+
+async function drawOSRM(waypoints) {
+    const coords = waypoints.map(w=>`${w[1]},${w[0]}`).join(';');
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+    const data = await (await fetch(url)).json();
+    if(!data.routes?.[0]) throw new Error('no route');
+
+    clearLine();
+    S.routeLine = L.geoJSON(data.routes[0].geometry, {
+        style:{color:'#f97316', weight:5, opacity:.82}
+    }).addTo(S.map);
+    S.map.fitBounds(S.routeLine.getBounds(), {padding:[60,60]});
+
+    const km = (data.routes[0].distance/1000).toFixed(1);
+    const mn = Math.round(data.routes[0].duration/60);
+    toast(`🛣 ${km} км • ~${mn} хв`);
+}
+
+function drawStraight(pts) {
+    clearLine();
+    S.routeLine = L.polyline(pts, {color:'#f97316',weight:4,dashArray:'8,6',opacity:.75}).addTo(S.map);
+    S.map.fitBounds(S.routeLine.getBounds(), {padding:[60,60]});
+    toast('Маршрут (пряма лінія, офлайн)');
+}
+
+function clearLine() {
+    if(S.routeLine) { S.map.removeLayer(S.routeLine); S.routeLine=null; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD ROUTE SHEET
+// ═══════════════════════════════════════════════════════════
+async function loadRoute(input) {
+    const file = input.files[0]; if(!file) return;
+    loading('Читання маршрутного листа...');
+    try {
+        const rows = await readXLS(file, true);
+
+        // Parse header (rows 0-11)
+        let rNum='', rDate='', rExp='', rDriver='';
+        for(let i=0;i<Math.min(12,rows.length);i++) {
+            const row = rows[i];
+            for(let j=0;j<row.length;j++) {
+                const c = String(row[j]||'');
+                if(/(Реєстр|Реестр)/.test(c)) {
+                    const m=c.match(/№\s*(\S+)/); if(m) rNum=m[1];
+                }
+                if(/Дата:/.test(c)||/\d{2}\.\d{2}\.\d{4}/.test(c)) {
+                    const m=c.match(/\d{2}\.\d{2}\.\d{4}/); if(m) rDate=m[0];
+                }
+                if(/(Екcпедитор|Экспедитор)/i.test(c)) {
+                    const m=c.match(/:\s*(.+)/); if(m) rExp=m[1].trim();
+                }
+                if(/Водій|Водитель/i.test(c)) {
+                    const m=c.match(/:\s*(.+)/); if(m) rDriver=m[1].trim();
+                }
+            }
+        }
+
+        // Data rows from 12: col14=partner, col25=address, col37=weight, col(TTN)=номер накладної
+        // col indexes from real file: 14=партнер, 25=адреса, 37=вага, 1=номер ТТН
+        const rawRows = [];
+        for(let i=12;i<rows.length;i++) {
+            const r=rows[i];
+            if(!r[14]||!r[25]) continue;
+            const partner = String(r[14]).trim();
+            const addrRaw = String(r[25]).trim();
+            const weight  = r[37] ? parseFloat(r[37])||0 : 0;
+            const ttn     = r[1]  ? String(r[1]).trim()  : '';
+            const addr    = parseAddr(addrRaw);
+            rawRows.push({ partner, addrRaw, address:addr, weight, ttn });
+        }
+
+        // GROUP by client + address
+        const groups = new Map();
+        for(const row of rawRows) {
+            const key = norm(row.partner) + '||' + norm(row.address);
+            if(!groups.has(key)) {
+                const coords = findCoords(row.addrRaw, row.partner);
+                groups.set(key, {
+                    name: row.partner,
+                    addrRaw: row.addrRaw,
+                    address: row.address,
+                    lat: coords?.lat||null,
+                    lng: coords?.lng||null,
+                    hasCoords: !!coords,
+                    done: false,
+                    invoices: []
+                });
+            }
+            const g = groups.get(key);
+            g.invoices.push({ ttn: row.ttn, weight: row.weight });
+        }
+
+        const pts = Array.from(groups.values());
+        // compute totals
+        pts.forEach(p => {
+            p.totalWeight   = p.invoices.reduce((s,inv) => s + inv.weight, 0);
+            p.invoiceCount  = p.invoices.length;
+        });
+
+        S.routePoints = pts;
+        S.rInfo = { rNum, rDate, rExp, rDriver };
+
+        renderRouteUI();
+        putMarkersOnMap();
+        switchTab('route');
+
+        const wc = pts.filter(p=>p.hasCoords).length;
+        const rawCount = rawRows.length;
+        const noCoords = pts.filter(p=>!p.hasCoords);
+        toast(`✓ ${pts.length} точок, ${rawCount} накладних (${wc} з координатами)`);
+
+        // Auto-geocode points without coords via Nominatim
+        if(noCoords.length > 0) {
+            geocodeMissing(noCoords);
+        }
+
+    } catch(e) { toast('Помилка читання файлу'); console.error(e); }
+    finally { hideLoading(); input.value=''; }
+}
+
+// Parse delivery address:
+// 'магазин "Копійка" - ОДЕССА м.Одеса, вул.Преображенська 66'
+// 'магазин "Копійка" - ОДЕССА.Посёлок Котовского м.Одеса, вул.С.Палія, 86'
+function parseAddr(raw) {
+    const parts = raw.split(/\s+-\s+/);
+    let addr = parts.length > 1 ? parts[parts.length-1].trim() : raw.trim();
+
+    // 1. If "м.Одеса," present — take everything after it
+    const cityMatch = addr.match(/м\.?\s*Одеси?[,\s]+(.+)/i);
+    if (cityMatch) return cityMatch[1].trim();
+
+    // 2. Strip city prefix: ОДЕССА / Одеса / г.Одесса
+    addr = addr.replace(/^(ОДЕСС?А|Одеса|г\.?\s*Одесс?а)[.\s,]*/i, '').trim();
+
+    // 3. If starts with address already (digit or street keyword) — return as is
+    const alreadyAddr = /^(\d|вул|пр[.\-]|просп|пров|бул|пл\.|мікр|мкр|б-р|пер\.)/i.test(addr);
+    if (!alreadyAddr) {
+        // Try to find street-type keyword preceded by space (strip district prefix)
+        const streetKw = addr.match(/\s(вул\.|вул\s|пр[-.\s]|просп\.|пров\.|бул\.|пл\.|мікрор|мкр\.|б-р|пер\.)/i);
+        if (streetKw) {
+            addr = addr.slice(streetKw.index + 1).trim();
+        } else {
+            // Try "N-й/N-а ..." pattern like "3-й Аеропортовський провулок 1"
+            const numMatch = addr.match(/(\d+-[а-яА-Яa-zA-Z]+\s.+)/);
+            if (numMatch) addr = numMatch[1].trim();
+        }
+    }
+
+    return addr || raw.trim();
+}
+
+// Auto-geocode all missing points with rate limiting
+// Build a geocoding query that preserves settlement context
+function buildGeoQuery(addrRaw) {
+    const parts = addrRaw.split(/\s+-\s+/);
+    let location = parts.length > 1 ? parts[parts.length-1].trim() : addrRaw.trim();
+
+    // Remove district noise
+    location = location.replace(/Одеськ[а-я]+\s+рн[,\s]*/gi, '');
+    location = location.replace(/Одеськ[а-я]+\s+район[,\s]*/gi, '');
+    // Remove ОДЕССА/ОДЕСА prefix
+    location = location.replace(/^ОДЕСС?А[.\s,]*/i, '');
+    // Remove leading м.Одеса
+    location = location.replace(/^м\.?\s*Одеси?[,\s]*/i, '');
+    // Clean whitespace
+    location = location.replace(/\s{2,}/g, ' ').replace(/^[,\s]+/, '').trim();
+
+    // Extract settlement name (с.Назва / м.Назва / смт.Назва) and move to front
+    // so Nominatim gets village context first
+    const settleMatch = location.match(/(?:^|[,\s])([смСМ](?:мт)?\.?\s*[А-ЯІЇЄа-яіїє][А-ЯІЇЄа-яіїє'-]+(?:\s+[А-ЯІЇЄа-яіїє][А-ЯІЇЄа-яіїє'-]+)*)/);
+    if (settleMatch) {
+        const settle = settleMatch[1].trim();
+        // Remove duplicate settlement mention and put it first
+        const withoutSettle = location.replace(settleMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
+        location = settle + ', ' + withoutSettle;
+    }
+
+    // Add region context
+    const hasOdesa = /одес/i.test(location);
+    location += hasOdesa ? ', Україна' : ', Одеська область, Україна';
+
+    return location;
+}
+
+async function geocodeMissing(pts) {
+    let geocoded = 0;
+    for(const p of pts) {
+        const query = buildGeoQuery(p.addrRaw);
+        const coords = await geocodeAddr(query);
+        if(coords) {
+            p.lat = coords.lat;
+            p.lng = coords.lng;
+            p.hasCoords = true;
+            p.geocoded = true; // yellow marker flag
+            geocoded++;
+            // Add marker immediately as it's found
+            addGeocodedMarker(p);
+            updateStats();
+        }
+        // Nominatim rate limit — max 1 req/sec
+        await new Promise(r => setTimeout(r, 1100));
+    }
+    if(geocoded > 0) {
+        renderRouteUI();
+        toast(`📍 Знайдено на мапі: ${geocoded} з ${pts.length} адрес`);
+    } else if(pts.length > 0) {
+        toast(`⚠️ ${pts.length} адрес не знайдено на мапі`);
+    }
+}
+
+function addGeocodedMarker(p) {
+    const color = '#eab308'; // yellow
+    const num = S.routePoints.indexOf(p) + 1;
+    const icon = pinIcon(color, String(num));
+    const m = L.marker([p.lat, p.lng], {icon})
+        .addTo(S.map)
+        .bindPopup(mkPopup(p.name, p.address, p.lat, p.lng, p.invoices||[]));
+    S.routeMarkers.push(m);
+}
+
+// Geocode via Nominatim — bounded to Odesa oblast bounding box
+// Odesa oblast bounds: lat 45.1–47.6, lon 28.9–32.1
+const ODESA_VIEWBOX = '28.9,47.6,32.1,45.1'; // left,top,right,bottom
+
+async function geocodeAddr(query) {
+    try {
+        const q = encodeURIComponent(query);
+        // First try: bounded search within Odesa oblast
+        const urlBounded = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&accept-language=uk&countrycodes=ua&viewbox=${ODESA_VIEWBOX}&bounded=1`;
+        const dataBounded = await (await fetch(urlBounded)).json();
+        if (dataBounded && dataBounded[0]) {
+            return { lat: parseFloat(dataBounded[0].lat), lng: parseFloat(dataBounded[0].lon) };
+        }
+        // Second try: unbounded but still Ukraine only
+        const urlUA = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&accept-language=uk&countrycodes=ua`;
+        const dataUA = await (await fetch(urlUA)).json();
+        if (dataUA && dataUA[0]) {
+            return { lat: parseFloat(dataUA[0].lat), lng: parseFloat(dataUA[0].lon) };
+        }
+    } catch(e) {}
+    return null;
+}
+
+// Find coordinates in DB:
+// 1. Find all DB entries for this client by name
+// 2. Among them — match address WITHOUT parsing (raw comparison)
+// 3. If no match — return null (caller will geocode via Nominatim)
+function findCoords(addrRaw, name) {
+    if(!S.dbLoaded || !S.db.length) return null;
+    const nn = norm(name);
+
+    // Get all entries for this client
+    const byName = S.db.filter(p => norm(p.name) === nn);
+
+    // Fallback: loose name match (e.g. slight spelling diff)
+    const clientPts = byName.length > 0
+        ? byName
+        : S.db.filter(p => {
+            const pn = norm(p.name);
+            return pn.includes(nn) || nn.includes(pn);
+          });
+
+    if(clientPts.length === 0) {
+        // Client not in DB at all — try pure address match across all records
+        return findByAddressOnly(addrRaw);
+    }
+
+    // Always verify address even if only one entry — client may have opened a new location
+    const rn = norm(addrRaw);
+
+    // 1. Exact raw match
+    let f = clientPts.find(p => norm(p.address) === rn);
+    if(f) return f;
+
+    // 2. DB address contained in raw string
+    f = clientPts.find(p => {
+        const da = norm(p.address);
+        return da.length > 6 && rn.includes(da);
+    });
+    if(f) return f;
+
+    // 3. Raw string contained in DB address
+    f = clientPts.find(p => {
+        const da = norm(p.address);
+        return rn.length > 6 && da.includes(rn);
+    });
+    if(f) return f;
+
+    // 4. Word-level overlap — only meaningful words (street names, numbers)
+    // Exclude generic city/location words that appear in all addresses
+    const GENERIC = new Set(['одеса','одесса','одесі','місто','район','область','україна','вулиця','провулок','проспект','бульвар','площа','алея','узвіз','тупик']);
+    const rawWords = rn.split(/\s+/).filter(w => w.length > 3 && !GENERIC.has(w));
+    if(rawWords.length > 0) {
+        let best = null, bestScore = 0;
+        for(const p of clientPts) {
+            const da = norm(p.address);
+            const score = rawWords.filter(w => da.includes(w)).length;
+            if(score > bestScore) { bestScore = score; best = p; }
+        }
+        // Require at least 1 meaningful word match (not just city name)
+        if(bestScore > 0) return best;
+    }
+
+    // 5. No address match among client's points — return null so caller geocodes
+    return null;
+}
+
+// Address-only search (client not in DB)
+function findByAddressOnly(addrRaw) {
+    const an = norm(parseAddr(addrRaw));
+    if(an.length < 6) return null;
+
+    let f = S.db.find(p => norm(p.address).includes(an));
+    if(f) return f;
+
+    f = S.db.find(p => {
+        const da = norm(p.address);
+        return da.length > 8 && an.includes(da);
+    });
+    return f || null;
+}
+
+function norm(s) {
+    return s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()«»"']/g,' ').replace(/\s+/g,' ').trim();
+}
+
+// Safe-encode invoices array for inline onclick
+function escInv(invoices) {
+    if(!invoices || !invoices.length) return '[]';
+    try { return JSON.stringify(JSON.stringify(invoices)).replace(/</g,'\\u003c'); }
+    catch(e) { return '[]'; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER ROUTE UI
+// ═══════════════════════════════════════════════════════════
+function renderRouteUI() {
+    const {rNum,rDate,rExp,rDriver} = S.rInfo;
+    const ri = document.getElementById('rinfo');
+    ri.style.display = 'block';
+    document.getElementById('rmeta').textContent = [rDate, rDriver].filter(Boolean).join(' • ');
+    document.getElementById('rtitle').textContent = rNum ? `Реєстр № ${rNum}` : 'Маршрутний лист';
+    if(rExp) document.getElementById('rmeta').textContent += (document.getElementById('rmeta').textContent?` • `:'') + rExp;
+
+    updateStats();
+
+    document.getElementById('optbtn').style.display = 'flex';
+    document.getElementById('upzone').style.display  = 'none';
+
+    document.getElementById('rlist').innerHTML = S.routePoints.map((p,i) => `
+        <div class="rcard ${p.done?'done':''}" id="ri${i}">
+            <div class="rnr ${p.done?'green':(!p.hasCoords?'red':'')}">${p.done?'✓':(i+1)}</div>
+            <div class="rcinfo">
+                <div class="rcname">${esc2(p.name)}</div>
+                <div class="rcaddr">${esc2(p.address)}</div>
+                <div class="rc-inv-row">
+                    <span class="inv-pill">📦 ${p.invoiceCount} накл.</span>
+                    ${p.totalWeight?`<span class="inv-pill">⚖️ ${p.totalWeight.toFixed(1)} кг</span>`:''}
+                    ${!p.hasCoords?`<span class="inv-pill red">без координат</span>`:p.geocoded?`<span class="inv-pill yellow">📍 мапа</span>`:''}
+                </div>
+                <div class="inv-list" id="invlist${i}">
+                    ${p.invoices.map(inv=>`
+                        <div class="inv-item">
+                            <span class="inv-ttn">${esc2(inv.ttn||'—')}</span>
+                            ${inv.weight?`<span class="inv-wt">${inv.weight.toFixed(1)} кг</span>`:''}
+                        </div>`).join('')}
+                </div>
+                <div class="rcactions">
+                    <button class="abtn nav" onclick="showRoutePoint(${i})">📍 Карта</button>
+                    ${p.hasCoords?`<button class="abtn nav" onclick="navTo(${p.lat},${p.lng})">🧭 Маршрут</button>`:''}
+                    <button class="abtn done-btn ${p.done?'on':''}" onclick="toggleDone(${i})">${p.done?'✓ Виконано':'Відмітити'}</button>
+                </div>
+            </div>
+        </div>`).join('');
+}
+
+function updateStats() {
+    const total = S.routePoints.length;
+    const done  = S.routePoints.filter(p=>p.done).length;
+    const nc    = S.routePoints.filter(p=>!p.hasCoords).length;
+    const invTotal = S.routePoints.reduce((s,p)=>s+(p.invoiceCount||1),0);
+    document.getElementById('s-total').textContent = total;
+    document.getElementById('s-done').textContent  = done;
+    document.getElementById('s-nc').textContent    = nc;
+    const sinv = document.getElementById('s-inv');
+    if(sinv) sinv.textContent = invTotal;
+}
+
+function toggleDone(i) {
+    S.routePoints[i].done = !S.routePoints[i].done;
+    renderRouteUI();
+    putMarkersOnMap();
+}
+
+// ═══════════════════════════════════════════════════════════
+// MARKERS ON MAP
+// ═══════════════════════════════════════════════════════════
+function putMarkersOnMap() {
+    S.routeMarkers.forEach(m => S.map.removeLayer(m));
+    S.routeMarkers = [];
+
+    const allValid = S.routePoints.filter(p=>p.hasCoords);
+
+    allValid.forEach((p, idx) => {
+        const num = S.routePoints.indexOf(p)+1;
+        const color = p.done ? '#22c55e' : (p.geocoded ? '#eab308' : '#f97316');
+        const lbl   = p.done ? '✓' : String(num);
+        const icon  = pinIcon(color, lbl);
+
+        const m = L.marker([p.lat,p.lng],{icon})
+            .addTo(S.map)
+            .bindPopup(mkPopup(p.name, p.address, p.lat, p.lng, p.invoices||[]));
+        S.routeMarkers.push(m);
+    });
+
+    const pending = allValid.filter(p=>!p.done);
+    if(pending.length>0) {
+        const bounds = L.latLngBounds(allValid.map(p=>[p.lat,p.lng]));
+        S.map.fitBounds(bounds, {padding:[60,60]});
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// OPTIMIZE
+// ═══════════════════════════════════════════════════════════
+async function doOptimize() {
+    const pending = S.routePoints.filter(p=>p.hasCoords&&!p.done);
+    if(pending.length<2) { toast('Недостатньо точок'); return; }
+
+    loading('Оптимізація маршруту...');
+    try {
+        let startLat, startLng;
+        try {
+            const pos = await getPos();
+            startLat=pos.lat; startLng=pos.lng;
+            if(!S.userLat) updateUserPos(startLat,startLng);
+        } catch(e) {
+            startLat = pending.reduce((s,p)=>s+p.lat,0)/pending.length;
+            startLng = pending.reduce((s,p)=>s+p.lng,0)/pending.length;
+            toast('GPS недоступний, оптимізація від центру');
+        }
+
+        // Nearest-neighbor TSP
+        const optimized = nnTSP(pending, startLat, startLng);
+        const done = S.routePoints.filter(p=>!p.hasCoords||p.done);
+        S.routePoints = [...optimized, ...done];
+
+        renderRouteUI();
+        putMarkersOnMap();
+
+        // Draw route
+        await drawOptRoute(startLat, startLng, optimized);
+        toast(`✓ Маршрут оптимізовано: ${optimized.length} точок`);
+
+    } catch(e) { toast('Помилка оптимізації'); console.error(e); }
+    finally { hideLoading(); }
+}
+
+function nnTSP(pts, sLat, sLng) {
+    const unv=[...pts]; const route=[];
+    let cLat=sLat, cLng=sLng;
+    while(unv.length) {
+        let best=null, bd=Infinity, bi=-1;
+        for(let i=0;i<unv.length;i++) {
+            const d=hav(cLat,cLng,unv[i].lat,unv[i].lng);
+            if(d<bd){bd=d;best=unv[i];bi=i;}
+        }
+        route.push(best); cLat=best.lat; cLng=best.lng; unv.splice(bi,1);
+    }
+    return route;
+}
+
+function hav(la1,lo1,la2,lo2) {
+    const R=6371, dLa=(la2-la1)*Math.PI/180, dLo=(lo2-lo1)*Math.PI/180;
+    const a=Math.sin(dLa/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLo/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+async function drawOptRoute(sLat, sLng, pts) {
+    clearLine();
+    const wp = [[sLat,sLng],...pts.map(p=>[p.lat,p.lng])];
+    try {
+        const slice = wp.slice(0,100);
+        const coords = slice.map(w=>`${w[1]},${w[0]}`).join(';');
+        const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+        const data = await (await fetch(url)).json();
+        if(!data.routes?.[0]) throw '';
+        S.routeLine = L.geoJSON(data.routes[0].geometry,{
+            style:{color:'#f97316',weight:4,opacity:.78}
+        }).addTo(S.map);
+        S.map.fitBounds(S.routeLine.getBounds(),{padding:[50,50]});
+        const km=(data.routes[0].distance/1000).toFixed(1);
+        const mn=Math.round(data.routes[0].duration/60);
+        toast(`🛣 ${km} км • ~${mn} хв`);
+    } catch(e) {
+        S.routeLine = L.polyline(wp,{color:'#f97316',weight:3,dashArray:'8,6',opacity:.7}).addTo(S.map);
+        S.map.fitBounds(S.routeLine.getBounds(),{padding:[50,50]});
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLEAR MAP
+// ═══════════════════════════════════════════════════════════
+function clearMap() {
+    if(S.searchMarker){ S.map.removeLayer(S.searchMarker); S.searchMarker=null; }
+    clearLine();
+    S.routeMarkers.forEach(m=>S.map.removeLayer(m)); S.routeMarkers=[];
+    S.routePoints=[];
+    document.getElementById('rlist').innerHTML='';
+    document.getElementById('rinfo').style.display='none';
+    document.getElementById('optbtn').style.display='none';
+    document.getElementById('upzone').style.display='block';
+    toast('Карту очищено');
+}
+
+// ═══════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════
+function pinIcon(color, label) {
+    return L.divIcon({
+        html:`<div style="width:28px;height:28px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(45deg);color:#fff;font-size:${label.length>1?'9px':'11px'};font-weight:700;font-family:'Barlow Condensed',sans-serif;line-height:1">${label}</span></div>`,
+        iconSize:[28,28], iconAnchor:[9,28], className:''
+    });
+}
+
+function readXLS(file, raw=false) {
+    return new Promise((res,rej)=>{
+        const reader=new FileReader();
+        reader.onload=e=>{
+            try {
+                const wb=XLSX.read(e.target.result,{type:'binary'});
+                const ws=wb.Sheets[wb.SheetNames[0]];
+                res(XLSX.utils.sheet_to_json(ws,{header:1,raw,defval:null}));
+            } catch(err){rej(err);}
+        };
+        reader.onerror=rej;
+        reader.readAsBinaryString(file);
+    });
+}
+
+// Safe escape for use in onclick attrs
+function esc(s) { return JSON.stringify(String(s)).replace(/</g,'\\u003c'); }
+function esc2(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function loading(t='Завантаження...') {
+    document.getElementById('ltxt').textContent=t;
+    document.getElementById('loading').classList.add('on');
+}
+function hideLoading(){ document.getElementById('loading').classList.remove('on'); }
+
+let tTimer;
+function toast(msg){
+    const el=document.getElementById('toast');
+    el.textContent=msg; el.classList.add('on');
+    clearTimeout(tTimer); tTimer=setTimeout(()=>el.classList.remove('on'),3000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// OFFLINE BANNER
+// ═══════════════════════════════════════════════════════════
+window.addEventListener('online',  ()=>document.getElementById('offline').classList.remove('on'));
+window.addEventListener('offline', ()=>document.getElementById('offline').classList.add('on'));
+if(!navigator.onLine) document.getElementById('offline').classList.add('on');
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ADMIN
+// ═══════════════════════════════════════════════════════════
+const DEFAULT_PIN = '1234';
+let pinBuffer = '';
+let adminUnlocked = false;
+
+function getPin() { return localStorage.getItem('adminPin') || DEFAULT_PIN; }
+
+function pinTap(d) {
+    if(pinBuffer.length >= 4) return;
+    pinBuffer += d;
+    updatePinDots();
+    document.getElementById('pin-err').style.display = 'none';
+    if(pinBuffer.length === 4) setTimeout(pinSubmit, 150);
+}
+
+function updatePinDots() {
+    for(let i=0;i<4;i++) {
+        document.getElementById('pd'+i).classList.toggle('filled', i < pinBuffer.length);
+    }
+}
+
+function pinClear() {
+    pinBuffer = pinBuffer.slice(0,-1);
+    updatePinDots();
+}
+
+function pinSubmit() {
+    if(pinBuffer === getPin()) {
+        adminUnlocked = true;
+        document.getElementById('admin-lock').style.display  = 'none';
+        document.getElementById('admin-panel').style.display = 'block';
+        updateAdminInfo();
+    } else {
+        pinBuffer = '';
+        updatePinDots();
+        const err = document.getElementById('pin-err');
+        err.style.display = 'block';
+        setTimeout(()=>err.style.display='none', 2000);
+    }
+}
+
+function adminLogout() {
+    adminUnlocked = false;
+    pinBuffer = '';
+    updatePinDots();
+    document.getElementById('admin-lock').style.display  = 'block';
+    document.getElementById('admin-panel').style.display = 'none';
+    switchTab('search');
+}
+
+function changePin() {
+    const np = document.getElementById('new-pin').value.trim();
+    if(!/^\d{4}$/.test(np)) { toast('PIN повинен бути 4 цифри'); return; }
+    localStorage.setItem('adminPin', np);
+    document.getElementById('new-pin').value = '';
+    toast('✓ PIN змінено');
+}
+
+function updateAdminInfo() {
+    updateGHStatus();
+    const el = document.getElementById('admin-db-info');
+    if(S.dbLoaded) {
+        const ts = localStorage.getItem('dbUpdated') || localStorage.getItem('cloudSyncTime') || 'невідомо';
+        el.innerHTML = `✓ Завантажено: <b>${S.db.length}</b> точок<br>Оновлено: <b>${ts}</b>`;
+    } else {
+        el.textContent = 'База не завантажена';
+    }
+}
+
+async function adminUpdateDB(input) {
+    const file = input.files[0]; if(!file) return;
+
+    const prog = document.getElementById('admin-db-progress');
+    const fill = document.getElementById('prog-fill');
+    const txt  = document.getElementById('prog-txt');
+    prog.style.display = 'block';
+
+    try {
+        txt.textContent = 'Читання файлу...'; fill.style.width = '10%';
+        const rows = await readXLS(file);
+
+        txt.textContent = 'Обробка точок...'; fill.style.width = '40%';
+        const pts = [];
+        for(const r of rows) {
+            if(r[0] && r[1] && r[2] && r[3]) {
+                const lat = parseFloat(String(r[2]).replace(',','.'));
+                const lng = parseFloat(String(r[3]).replace(',','.'));
+                if(!isNaN(lat) && !isNaN(lng) && Math.abs(lat)<=90 && Math.abs(lng)<=180)
+                    pts.push({ name:String(r[0]).trim(), address:String(r[1]).trim(), lat, lng });
+            }
+        }
+
+        txt.textContent = 'Збереження в кеш...'; fill.style.width = '75%';
+        await saveIDB(pts);
+
+        S.db = pts; S.dbLoaded = true;
+        const now = new Date().toLocaleString('uk-UA');
+        localStorage.setItem('dbUpdated', now);
+        updateDBUI();
+        updateAdminInfo();
+
+        // Generate db.js content
+        _generatedDbJs = 'window.DB_DATA = ' + JSON.stringify(pts) + ';';
+
+        // Try GitHub push first
+        const {owner, repo, token} = getGHCfg();
+        const hasGH = owner && repo && token;
+
+        if(hasGH) {
+            fill.style.width = '88%';
+            txt.textContent = 'Публікація на GitHub...';
+            const pushed = await pushDbJsToGitHub(_generatedDbJs);
+            fill.style.width = '100%';
+            if(pushed) {
+                txt.textContent = `🚀 Готово! ${pts.length} точок — Netlify деплоїть...`;
+                toast(`🚀 База оновлена! Netlify оновить сайт за ~30 сек`);
+                updateGHStatus();
+                // Hide manual download hint
+                document.getElementById('dl-db-btn').style.display = 'none';
+                document.getElementById('dl-hint').style.display   = 'none';
+            } else {
+                fill.style.width = '100%';
+                txt.textContent = `⚠️ GitHub помилка — скачайте db.js вручну`;
+                document.getElementById('dl-db-btn').style.display = 'flex';
+                document.getElementById('dl-hint').style.display   = 'block';
+                toast('⚠️ GitHub недоступний — скачайте db.js');
+            }
+        } else {
+            fill.style.width = '100%';
+            txt.textContent = `✓ ${pts.length} точок — скачайте db.js`;
+            document.getElementById('dl-db-btn').style.display = 'flex';
+            document.getElementById('dl-hint').style.display   = 'block';
+            toast(`✓ ${pts.length} точок — скачайте db.js і замініть на сайті`);
+        }
+        setTimeout(()=>{ prog.style.display='none'; fill.style.width='0%'; }, 3000);
+    } catch(e) {
+        txt.textContent = 'Помилка читання файлу';
+        toast('Помилка оновлення бази');
+        console.error(e);
+    } finally {
+        input.value = '';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DOWNLOAD db.js
+// ═══════════════════════════════════════════════════════════
+let _generatedDbJs = '';
+
+function downloadDbJs() {
+    if(!_generatedDbJs) { toast('Спочатку завантажте Excel'); return; }
+    const blob = new Blob([_generatedDbJs], {type:'text/javascript'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'db.js';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('✓ db.js скачано');
+}
+
+// ═══════════════════════════════════════════════════════════
+// GITHUB INTEGRATION
+// ═══════════════════════════════════════════════════════════
+function getGHCfg() {
+    return {
+        owner: localStorage.getItem('ghOwner') || '',
+        repo:  localStorage.getItem('ghRepo')  || '',
+        token: localStorage.getItem('ghToken') || ''
+    };
+}
+
+function saveGHSettings() {
+    const owner = document.getElementById('gh-owner').value.trim();
+    const repo  = document.getElementById('gh-repo').value.trim();
+    const token = document.getElementById('gh-token').value.trim();
+    if(!owner || !repo || !token) { toast('Заповніть всі поля'); return; }
+    localStorage.setItem('ghOwner', owner);
+    localStorage.setItem('ghRepo',  repo);
+    localStorage.setItem('ghToken', token);
+    updateGHStatus();
+    toast('✓ GitHub налаштування збережено');
+}
+
+function updateGHStatus() {
+    const {owner, repo, token} = getGHCfg();
+    const el = document.getElementById('gh-status');
+    if(!el) return;
+    if(owner && repo && token) {
+        const ts = localStorage.getItem('ghLastDeploy') || '';
+        el.innerHTML = `✅ <b>${owner}/${repo}</b>${ts ? '<br><span style="font-size:11px;color:var(--muted)">Останній деплой: '+ts+'</span>' : ''}`;
+        document.getElementById('gh-owner').value = owner;
+        document.getElementById('gh-repo').value  = repo;
+        document.getElementById('gh-token').value = token;
+    } else {
+        el.textContent = 'Не налаштовано';
+    }
+}
+
+async function testGHConnection() {
+    const {owner, repo, token} = getGHCfg();
+    if(!owner || !repo || !token) { toast('Спочатку збережіть налаштування'); return; }
+    loading('Перевірка GitHub...');
+    try {
+        const r = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
+        });
+        if(r.ok) {
+            toast('✅ GitHub підключено успішно!');
+        } else if(r.status === 401) {
+            toast('❌ Невірний токен');
+        } else if(r.status === 404) {
+            toast('❌ Репозиторій не знайдено');
+        } else {
+            toast(`❌ Помилка: ${r.status}`);
+        }
+    } catch(e) { toast('❌ Немає з'єднання'); }
+    finally { hideLoading(); }
+}
+
+async function pushDbJsToGitHub(jsContent) {
+    const {owner, repo, token} = getGHCfg();
+    if(!owner || !repo || !token) return false;
+
+    try {
+        // Get current file SHA (needed to update existing file)
+        const filePath = 'db.js';
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+        const headers = {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/vnd.github+json',
+            'Content-Type': 'application/json'
+        };
+
+        let sha = null;
+        const existing = await fetch(apiUrl, { headers });
+        if(existing.ok) {
+            const data = await existing.json();
+            sha = data.sha;
+        }
+
+        // Base64 encode content
+        const b64 = btoa(unescape(encodeURIComponent(jsContent)));
+        const now = new Date().toLocaleString('uk-UA');
+
+        const body = {
+            message: `Оновлення бази клієнтів ${now}`,
+            content: b64,
+            ...(sha ? { sha } : {})
+        };
+
+        const r = await fetch(apiUrl, {
+            method: 'PUT', headers,
+            body: JSON.stringify(body)
+        });
+
+        if(r.ok) {
+            localStorage.setItem('ghLastDeploy', now);
+            return true;
+        }
+        console.error('GitHub push failed:', r.status, await r.text());
+        return false;
+    } catch(e) {
+        console.error('GitHub push error:', e);
+        return false;
+    }
+}
+
+async function init() {
+    initMap();
+
+    // Priority: IndexedDB (admin-updated) → bundled db.js
+    const cached = await loadIDB();
+    if(cached.length > 0) {
+        S.db = cached; S.dbLoaded = true;
+        updateDBUI();
+    } else if(window.DB_DATA && window.DB_DATA.length) {
+        S.db = window.DB_DATA; S.dbLoaded = true;
+        updateDBUI();
+        saveIDB(S.db).catch(()=>{});
+    } else {
+        document.getElementById('db-status').textContent = 'Помилка завантаження бази';
+        document.getElementById('db-count').textContent  = 'Зверніться до адміністратора';
+    }
+
+    // Register SW
+    if('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(()=>{});
+    }
+
+    expand();
+}
+
+init();
+</script>
+</body>
+</html>
