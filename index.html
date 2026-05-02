@@ -249,6 +249,17 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
 .empty svg { width:44px; height:44px; display:block; margin:0 auto 12px; opacity:.3; }
 .empty p { font-size:14px; line-height:1.5; }
 
+/* ── DRAG & DROP ── */
+.drag-handle {
+    width:24px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    color:var(--muted); cursor:grab; opacity:.45; touch-action:none;
+}
+.drag-handle:active { cursor:grabbing; }
+.drag-handle svg { width:16px; height:16px; }
+.rcard { touch-action:none; }
+.rcard.dragging { opacity:.35; border-color:var(--accent); }
+.rcard.drag-over { border-color:var(--accent); border-style:dashed; background:var(--accent-dim); }
+
 /* ── INVOICE STYLES ── */
 .rc-inv-row { display:flex; gap:5px; flex-wrap:wrap; margin:4px 0 2px; }
 .inv-pill {
@@ -479,7 +490,10 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
         <div id="tab-route" style="display:none">
 
             <div id="rinfo">
-                <div id="rmeta"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+                <div id="rmeta" style="margin:0"></div>
+                <button onclick="clearRoute()" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:600;padding:2px 4px">✕ Очистити</button>
+            </div>
                 <div id="rtitle"></div>
                 <div id="rstats">
                     <div class="rstat">Точок: <b id="s-total">0</b></div>
@@ -1059,6 +1073,7 @@ async function loadRoute(input) {
         putMarkersOnMap();
         switchTab('route');
 
+        saveRouteToStorage();
         const wc = pts.filter(p=>p.hasCoords).length;
         const rawCount = rawRows.length;
         const noCoords = pts.filter(p=>!p.hasCoords);
@@ -1302,8 +1317,13 @@ function renderRouteUI() {
     document.getElementById('optbtn').style.display = 'flex';
     document.getElementById('upzone').style.display  = 'none';
 
+    setTimeout(initTouchDrag, 100);
     document.getElementById('rlist').innerHTML = S.routePoints.map((p,i) => `
-        <div class="rcard ${p.done?'done':''}" id="ri${i}">
+        <div class="rcard ${p.done?'done':''}" id="ri${i}" draggable="true"
+             ondragstart="dragStart(${i})" ondragover="dragOver(event,${i})" ondrop="dragDrop(event,${i})" ondragend="dragEnd()">
+            <div class="drag-handle" title="Перетягнути">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01"/></svg>
+            </div>
             <div class="rnr ${p.done?'green':(!p.hasCoords?'red':'')}">${p.done?'✓':(i+1)}</div>
             <div class="rcinfo">
                 <div class="rcname">${esc2(p.name)}</div>
@@ -1345,6 +1365,7 @@ function toggleDone(i) {
     S.routePoints[i].done = !S.routePoints[i].done;
     renderRouteUI();
     putMarkersOnMap();
+    saveRouteToStorage();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1376,6 +1397,147 @@ function putMarkersOnMap() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// DRAG & DROP SORT
+// ═══════════════════════════════════════════════════════════
+let _dragIdx = null;
+
+function dragStart(i) {
+    _dragIdx = i;
+    setTimeout(() => {
+        const el = document.getElementById('ri'+i);
+        if(el) el.classList.add('dragging');
+    }, 0);
+}
+
+function dragOver(e, i) {
+    e.preventDefault();
+    document.querySelectorAll('.rcard').forEach(c => c.classList.remove('drag-over'));
+    const el = document.getElementById('ri'+i);
+    if(el && i !== _dragIdx) el.classList.add('drag-over');
+}
+
+function dragDrop(e, i) {
+    e.preventDefault();
+    if(_dragIdx === null || _dragIdx === i) return;
+    // Reorder array
+    const moved = S.routePoints.splice(_dragIdx, 1)[0];
+    S.routePoints.splice(i, 0, moved);
+    _dragIdx = null;
+    renderRouteUI();
+    putMarkersOnMap();
+    saveRouteToStorage();
+    clearLine();
+}
+
+function dragEnd() {
+    _dragIdx = null;
+    document.querySelectorAll('.rcard').forEach(c => {
+        c.classList.remove('dragging');
+        c.classList.remove('drag-over');
+    });
+}
+
+// Touch drag support for mobile
+let _touchDragIdx = null, _touchClone = null;
+
+function initTouchDrag() {
+    const list = document.getElementById('rlist');
+    if(!list) return;
+
+    list.addEventListener('touchstart', e => {
+        const handle = e.target.closest('.drag-handle');
+        if(!handle) return;
+        const card = handle.closest('.rcard');
+        if(!card) return;
+        const idx = parseInt(card.id.replace('ri',''));
+        _touchDragIdx = idx;
+        card.classList.add('dragging');
+        e.preventDefault();
+    }, {passive: false});
+
+    list.addEventListener('touchmove', e => {
+        if(_touchDragIdx === null) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const card = el && el.closest('.rcard');
+        document.querySelectorAll('.rcard').forEach(c => c.classList.remove('drag-over'));
+        if(card) {
+            const targetIdx = parseInt(card.id.replace('ri',''));
+            if(targetIdx !== _touchDragIdx) card.classList.add('drag-over');
+        }
+    }, {passive: false});
+
+    list.addEventListener('touchend', e => {
+        if(_touchDragIdx === null) return;
+        const touch = e.changedTouches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const card = el && el.closest('.rcard');
+        if(card) {
+            const targetIdx = parseInt(card.id.replace('ri',''));
+            if(targetIdx !== _touchDragIdx) {
+                const moved = S.routePoints.splice(_touchDragIdx, 1)[0];
+                S.routePoints.splice(targetIdx, 0, moved);
+                renderRouteUI();
+                putMarkersOnMap();
+                saveRouteToStorage();
+                clearLine();
+            }
+        }
+        document.querySelectorAll('.rcard').forEach(c => {
+            c.classList.remove('dragging');
+            c.classList.remove('drag-over');
+        });
+        _touchDragIdx = null;
+        initTouchDrag(); // re-bind after re-render
+    }, {passive: true});
+}
+
+// ═══════════════════════════════════════════════════════════
+// SAVE / RESTORE ROUTE (localStorage)
+// ═══════════════════════════════════════════════════════════
+const ROUTE_KEY = 'savedRoute';
+
+function saveRouteToStorage() {
+    if(!S.routePoints.length) return;
+    try {
+        const data = {
+            rInfo: S.rInfo,
+            points: S.routePoints.map(p => ({
+                name: p.name, addrRaw: p.addrRaw, address: p.address,
+                lat: p.lat, lng: p.lng, hasCoords: p.hasCoords,
+                geocoded: p.geocoded||false, done: p.done,
+                invoices: p.invoices, invoiceCount: p.invoiceCount,
+                totalWeight: p.totalWeight
+            })),
+            savedAt: new Date().toISOString()
+        };
+        localStorage.setItem(ROUTE_KEY, JSON.stringify(data));
+    } catch(e) { console.warn('Route save failed:', e); }
+}
+
+function restoreRouteFromStorage() {
+    try {
+        const raw = localStorage.getItem(ROUTE_KEY);
+        if(!raw) return false;
+        const data = JSON.parse(raw);
+        if(!data.points || !data.points.length) return false;
+        S.routePoints = data.points;
+        S.rInfo = data.rInfo || {};
+        renderRouteUI();
+        putMarkersOnMap();
+        const d = new Date(data.savedAt);
+        const ts = d.toLocaleString('uk-UA');
+        toast(`📋 Маршрут відновлено (${ts})`);
+        return true;
+    } catch(e) { return false; }
+}
+
+function clearSavedRoute() {
+    localStorage.removeItem(ROUTE_KEY);
+}
+
+// ═══════════════════════════════════════════════════════════
 // OPTIMIZE
 // ═══════════════════════════════════════════════════════════
 async function doOptimize() {
@@ -1402,6 +1564,7 @@ async function doOptimize() {
 
         renderRouteUI();
         putMarkersOnMap();
+        saveRouteToStorage();
 
         // Draw route
         await drawOptRoute(startLat, startLng, optimized);
@@ -1456,6 +1619,18 @@ async function drawOptRoute(sLat, sLng, pts) {
 // ═══════════════════════════════════════════════════════════
 // CLEAR MAP
 // ═══════════════════════════════════════════════════════════
+function clearRoute() {
+    S.routePoints = [];
+    clearSavedRoute();
+    clearLine();
+    S.routeMarkers.forEach(m => S.map.removeLayer(m)); S.routeMarkers = [];
+    document.getElementById('rlist').innerHTML = '';
+    document.getElementById('rinfo').style.display = 'none';
+    document.getElementById('optbtn').style.display = 'none';
+    document.getElementById('upzone').style.display = 'block';
+    toast('Маршрут очищено');
+}
+
 function clearMap() {
     if(S.searchMarker){ S.map.removeLayer(S.searchMarker); S.searchMarker=null; }
     clearLine();
@@ -1725,19 +1900,31 @@ async function testGHConnection() {
     if(!owner || !repo || !token) { toast('Спочатку збережіть налаштування'); return; }
     loading('Перевірка GitHub...');
     try {
-        const r = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
+        const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/db.js`, {
+            headers: {
+                'Authorization': `token ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28'
+            }
         });
         if(r.ok) {
-            toast('✅ GitHub підключено успішно!');
+            toast('✅ GitHub підключено! db.js знайдено');
         } else if(r.status === 401) {
-            toast('❌ Невірний токен');
+            toast('❌ Невірний токен — перевірте і збережіть знову');
         } else if(r.status === 404) {
-            toast('❌ Репозиторій не знайдено');
+            const errData = await r.json().catch(()=>({}));
+            if(errData.message === 'Not Found') {
+                toast('❌ Репозиторій не знайдено — перевірте логін і назву');
+            } else {
+                toast('⚠️ db.js не знайдено в репо — але підключення є');
+            }
         } else {
-            toast(`❌ Помилка: ${r.status}`);
+            const txt = await r.text().catch(()=>'');
+            toast(`❌ Помилка ${r.status}: ${txt.slice(0,60)}`);
         }
-    } catch(e) { toast('❌ Немає з\'єднання'); }
+    } catch(e) {
+        toast(`❌ Мережева помилка: ${e.message}`);
+    }
     finally { hideLoading(); }
 }
 
@@ -1745,46 +1932,65 @@ async function pushDbJsToGitHub(jsContent) {
     const {owner, repo, token} = getGHCfg();
     if(!owner || !repo || !token) return false;
 
-    try {
-        // Get current file SHA (needed to update existing file)
-        const filePath = 'db.js';
-        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
-        const headers = {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github+json',
-            'Content-Type': 'application/json'
-        };
+    const filePath = 'db.js';
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+    const headers = {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28'
+    };
 
+    try {
+        // Step 1: Get current SHA of db.js (required for update)
         let sha = null;
-        const existing = await fetch(apiUrl, { headers });
-        if(existing.ok) {
-            const data = await existing.json();
+        const getResp = await fetch(apiUrl, { headers });
+        if(getResp.ok) {
+            const data = await getResp.json();
             sha = data.sha;
+            console.log('Got SHA:', sha);
+        } else if(getResp.status === 404) {
+            console.log('db.js not found — will create new file');
+        } else {
+            const err = await getResp.text();
+            console.error('GET failed:', getResp.status, err);
+            toast(`❌ GitHub помилка ${getResp.status}: ${getResp.statusText}`);
+            return false;
         }
 
-        // Base64 encode content
-        const b64 = btoa(unescape(encodeURIComponent(jsContent)));
-        const now = new Date().toLocaleString('uk-UA');
+        // Step 2: Base64 encode (must handle UTF-8 properly)
+        const bytes = new TextEncoder().encode(jsContent);
+        let binary = '';
+        bytes.forEach(b => binary += String.fromCharCode(b));
+        const b64 = btoa(binary);
 
+        const now = new Date().toLocaleString('uk-UA');
         const body = {
             message: `Оновлення бази клієнтів ${now}`,
             content: b64,
             ...(sha ? { sha } : {})
         };
 
-        const r = await fetch(apiUrl, {
+        // Step 3: Push
+        const putResp = await fetch(apiUrl, {
             method: 'PUT', headers,
             body: JSON.stringify(body)
         });
 
-        if(r.ok) {
+        if(putResp.ok) {
             localStorage.setItem('ghLastDeploy', now);
+            console.log('GitHub push OK');
             return true;
         }
-        console.error('GitHub push failed:', r.status, await r.text());
+
+        const errText = await putResp.text();
+        console.error('PUT failed:', putResp.status, errText);
+        toast(`❌ GitHub помилка ${putResp.status}: ${errText.slice(0,80)}`);
         return false;
+
     } catch(e) {
-        console.error('GitHub push error:', e);
+        console.error('GitHub fetch error:', e);
+        toast(`❌ Мережева помилка: ${e.message}`);
         return false;
     }
 }
@@ -1804,6 +2010,13 @@ async function init() {
     } else {
         document.getElementById('db-status').textContent = 'Помилка завантаження бази';
         document.getElementById('db-count').textContent  = 'Зверніться до адміністратора';
+    }
+
+    // Restore saved route
+    if(!restoreRouteFromStorage()) {
+        // No saved route — show upload zone
+    } else {
+        switchTab('route');
     }
 
     // Register SW
