@@ -1284,9 +1284,11 @@ function findCoords(addrRaw, name) {
     if(f) return f;
 
     // 4. Word-level overlap — only meaningful words (street names, numbers)
-    // Exclude generic city/location words that appear in all addresses
+    // Strip store-name prefix (everything before " - ") to avoid matching shop names
+    const addrParts = addrRaw.split(/\s+-\s+/);
+    const addrForWords = addrParts.length > 1 ? addrParts[addrParts.length-1] : addrRaw;
     const GENERIC = new Set(['одеса','одесса','одесі','місто','район','область','україна','вулиця','провулок','проспект','бульвар','площа','алея','узвіз','тупик']);
-    const rawWords = rn.split(/\s+/).filter(w => w.length > 3 && !GENERIC.has(w));
+    const rawWords = norm(addrForWords).split(/\s+/).filter(w => w.length > 3 && !GENERIC.has(w));
     if(rawWords.length > 0) {
         let best = null, bestScore = 0;
         for(const p of clientPts) {
