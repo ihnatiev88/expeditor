@@ -320,6 +320,8 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
 .ppop-btn:active { opacity:.8; }
 .ppop-btn.main { background:var(--accent); color:#fff; }
 .ppop-btn.sec { background:var(--surface2); color:var(--text); }
+.ppop-btn.ppop-done { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
+.ppop-btn.ppop-done-on { background:rgba(34,197,94,.15); color:var(--success); border:1px solid var(--success); }
 
 /* ── LOADING ── */
 #loading {
@@ -728,6 +730,35 @@ function switchTab(t) {
 // ═══════════════════════════════════════════════════════════
 // GPS
 // ═══════════════════════════════════════════════════════════
+// Auto-start GPS silently on load
+function startGPSAuto() {
+    if(!navigator.geolocation) return;
+    const btn = document.getElementById('gpsbtn');
+    btn.classList.add('on');
+    S.gpsWatch = navigator.geolocation.watchPosition(
+        p => updateUserPos(p.coords.latitude, p.coords.longitude),
+        () => {
+            // GPS denied or unavailable — just turn off button silently
+            btn.classList.remove('on');
+            S.gpsWatch = null;
+        },
+        { enableHighAccuracy:true, maximumAge:5000 }
+    );
+}
+
+// Warehouse marker on map
+function showWarehouseMarker() {
+    const icon = L.divIcon({
+        html:`<div style="width:32px;height:32px;background:#6366f1;border-radius:8px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </div>`,
+        iconSize:[32,32], iconAnchor:[16,16], className:''
+    });
+    L.marker([WAREHOUSE.lat, WAREHOUSE.lng], {icon, zIndexOffset:900})
+        .addTo(S.map)
+        .bindPopup(`<div class="ppop"><div class="ppop-name">Початкова точка</div><div class="ppop-addr">${WAREHOUSE.name}</div></div>`);
+}
+
 function toggleGPS() {
     const btn = document.getElementById('gpsbtn');
     if(S.gpsWatch) {
@@ -761,13 +792,22 @@ function updateUserPos(lat, lng) {
     }
 }
 
+// Warehouse — default start point
+const WAREHOUSE = { lat: 46.42864, lng: 30.65246, name: 'Склад (вул. Аеропортівська, 4)' };
+
 function getPos() {
-    return new Promise((res,rej) => {
-        if(S.userLat) { res({lat:S.userLat,lng:S.userLng}); return; }
-        if(!navigator.geolocation) { rej(); return; }
+    return new Promise((res) => {
+        // Already have live GPS position
+        if(S.userLat) { res({lat:S.userLat, lng:S.userLng}); return; }
+        // GPS button is off — use warehouse immediately, no waiting
+        if(!S.gpsWatch) { res(WAREHOUSE); return; }
+        // GPS is on but position not yet received — wait briefly
+        if(!navigator.geolocation) { res(WAREHOUSE); return; }
+        const timer = setTimeout(() => res(WAREHOUSE), 4000);
         navigator.geolocation.getCurrentPosition(
-            p => res({lat:p.coords.latitude, lng:p.coords.longitude}),
-            rej, {enableHighAccuracy:true, timeout:8000}
+            p => { clearTimeout(timer); res({lat:p.coords.latitude, lng:p.coords.longitude}); },
+            ()  => { clearTimeout(timer); res(WAREHOUSE); },
+            {enableHighAccuracy:true, timeout:4000}
         );
     });
 }
@@ -921,21 +961,20 @@ function goNom(lat, lng, name) {
 async function showRoutePoint(i) {
     const p = S.routePoints[i];
     if(!p) return;
-    await showPt(p.lat, p.lng, p.name, p.address, p.invoices||[], p.addrRaw||'');
+    await showPt(p.lat, p.lng, p.name, p.address, p.invoices||[], p.addrRaw||'', i);
 }
 
 // ═══════════════════════════════════════════════════════════
 // SHOW POINT ON MAP
 // ═══════════════════════════════════════════════════════════
-async function showPt(lat, lng, name, address, invoices) {
+async function showPt(lat, lng, name, address, invoices, addrRaw, pointIdx) {
     lat = parseFloat(lat);
     lng = parseFloat(lng);
 
     // No coords — try geocode via Nominatim
     if (isNaN(lat) || isNaN(lng)) {
         toast('Шукаємо адресу на карті...');
-        // Use addrRaw if available (from route point) for better context
-        const geoQuery = arguments[5] ? buildGeoQuery(arguments[5]) : address + ', Україна';
+        const geoQuery = addrRaw ? buildGeoQuery(addrRaw) : address + ', Україна';
         const coords = await geocodeAddr(geoQuery);
         if (!coords) { toast('Адресу не знайдено. Перевірте підключення до інтернету.'); return; }
         lat = coords.lat; lng = coords.lng;
@@ -943,18 +982,28 @@ async function showPt(lat, lng, name, address, invoices) {
 
     if(S.searchMarker) S.map.removeLayer(S.searchMarker);
     S.searchMarker = L.marker([lat,lng], { icon: pinIcon('#f97316','★'), zIndexOffset:500 }).addTo(S.map);
-    S.searchMarker.bindPopup(mkPopup(name, address, lat, lng, invoices||[])).openPopup();
+    S.searchMarker.bindPopup(mkPopup(name, address, lat, lng, invoices||[], pointIdx)).openPopup();
     S.map.setView([lat,lng], 16);
     collapse();
 }
 
-function mkPopup(name, address, lat, lng, invoices) {
+function mkPopup(name, address, lat, lng, invoices, pointIdx) {
     const invHtml = invoices && invoices.length
         ? `<div class="ppop-inv">
             <div class="ppop-inv-title">📦 ${invoices.length} накладних • ${invoices.reduce((s,v)=>s+v.weight,0).toFixed(1)} кг</div>
             ${invoices.map(inv=>`<div class="ppop-inv-row"><span>${esc2(inv.ttn||'—')}</span><span>${inv.weight?inv.weight.toFixed(1)+' кг':''}</span></div>`).join('')}
            </div>`
         : '';
+
+    const isDone = (pointIdx !== undefined) && S.routePoints[pointIdx]?.done;
+    const doneBtn = (pointIdx !== undefined)
+        ? `<button class="ppop-btn ${isDone?'ppop-done-on':'ppop-done'}" onclick="toggleDonePopup(${pointIdx})">
+               ${isDone
+                 ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Виконано'
+                 : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Відмітити'}
+           </button>`
+        : '';
+
     return L.popup({ closeButton:true, maxWidth:290, className:'' })
         .setContent(`<div class="ppop">
             <div class="ppop-name">${esc2(name)}</div>
@@ -969,8 +1018,17 @@ function mkPopup(name, address, lat, lng, invoices) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                     Google Maps
                 </button>
+                ${doneBtn}
             </div>
         </div>`);
+}
+
+function toggleDonePopup(i) {
+    S.routePoints[i].done = !S.routePoints[i].done;
+    renderRouteUI();
+    putMarkersOnMap();
+    saveRouteToStorage();
+    S.map.closePopup();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1101,6 +1159,8 @@ async function loadRoute(input) {
         switchTab('route');
 
         saveRouteToStorage();
+        // Auto-build route immediately
+        autoDrawRoute();
         const wc = pts.filter(p=>p.hasCoords).length;
         const rawCount = rawRows.length;
         const noCoords = pts.filter(p=>!p.hasCoords);
@@ -1147,36 +1207,38 @@ function parseAddr(raw) {
 }
 
 // Auto-geocode all missing points with rate limiting
-// Build a geocoding query that preserves settlement context
+// Build a geocoding query: settlement, street, house number
+// Default city — м. Одеса if no settlement found in address
 function buildGeoQuery(addrRaw) {
-    const parts = addrRaw.split(/\s+-\s+/);
-    let location = parts.length > 1 ? parts[parts.length-1].trim() : addrRaw.trim();
+    const parts = addrRaw.split(' - ', 1);  // intentional: split only first " - "
+    // actually split on first occurrence
+    const dashIdx = addrRaw.indexOf(' - ');
+    let loc = dashIdx >= 0 ? addrRaw.slice(dashIdx + 3).trim() : addrRaw.trim();
 
-    // Remove district noise
-    location = location.replace(/Одеськ[а-я]+\s+рн[,\s]*/gi, '');
-    location = location.replace(/Одеськ[а-я]+\s+район[,\s]*/gi, '');
-    // Remove ОДЕССА/ОДЕСА prefix
-    location = location.replace(/^ОДЕСС?А[.\s,]*/i, '');
-    // Remove leading м.Одеса
-    location = location.replace(/^м\.?\s*Одеси?[,\s]*/i, '');
-    // Clean whitespace
-    location = location.replace(/\s{2,}/g, ' ').replace(/^[,\s]+/, '').trim();
+    // 1. Clean noise
+    loc = loc.replace(/Одеськ[а-я]+\s+(рн|район)[,\s]*/gi, '');
+    loc = loc.replace(/\bОдес[аи]\s+(?=м\.)/gi, '');   // "Одеса м.Одеса" → "м.Одеса"
+    loc = loc.replace(/ОДЕСС?А\.?(?=\s*м\.)/g, '');     // "ОДЕССА м." → "м."
+    loc = loc.replace(/^ОДЕСС?А[,.\s]+/gi, '');            // leading ОДЕССА
+    loc = loc.replace(/\s{2,}/g, ' ').trim().replace(/^[,\s]+/, '').trim();
 
-    // Extract settlement name (с.Назва / м.Назва / смт.Назва) and move to front
-    // so Nominatim gets village context first
-    const settleMatch = location.match(/(?:^|[,\s])([смСМ](?:мт)?\.?\s*[А-ЯІЇЄа-яіїє][А-ЯІЇЄа-яіїє'-]+(?:\s+[А-ЯІЇЄа-яіїє][А-ЯІЇЄа-яіїє'-]+)*)/);
-    if (settleMatch) {
-        const settle = settleMatch[1].trim();
-        // Remove duplicate settlement mention and put it first
-        const withoutSettle = location.replace(settleMatch[0], ' ').replace(/\s{2,}/g, ' ').trim();
-        location = settle + ', ' + withoutSettle;
+    // 2. Find settlement: м./с./смт. + Name (words starting with UPPERCASE only)
+    const settleM = loc.match(/\b([смСМ](?:мт)?\.?\s*[А-ЯІЇЄ][А-ЯІЇЄа-яіїє\'-]+(?:\s+[А-ЯІЇЄ][А-ЯІЇЄа-яіїє\'-]+)?)/);
+    const settlement = settleM ? settleM[1].trim() : 'м. Одеса';
+
+    // 3. Street + house = everything after settlement
+    let rest = '';
+    if(settleM) {
+        rest = loc.slice(settleM.index + settleM[0].length).trim().replace(/^[.,]+/, '').trim();
+        // Remove duplicate last word of settlement at start of rest
+        const lastWord = settlement.split(/\s+/).pop().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        rest = rest.replace(new RegExp('^' + lastWord + '\\b\\s*[,.]?\\s*', 'i'), '').trim();
+    } else {
+        rest = loc.replace(/^Одес[аи]\b[,\s]*/i, '').trim();
     }
+    rest = rest.replace(/\s{2,}/g, ' ').trim().replace(/^[.,]+/, '').trim();
 
-    // Add region context
-    const hasOdesa = /одес/i.test(location);
-    location += hasOdesa ? ', Україна' : ', Одеська область, Україна';
-
-    return location;
+    return settlement + (rest ? ', ' + rest : '') + ', Україна';
 }
 
 async function geocodeMissing(pts) {
@@ -1536,6 +1598,7 @@ function restoreRouteFromStorage() {
         S.rInfo = data.rInfo || {};
         renderRouteUI();
         putMarkersOnMap();
+        autoDrawRoute();
         const d = new Date(data.savedAt);
         const ts = d.toLocaleString('uk-UA');
         toast(`📋 Маршрут відновлено (${ts})`);
@@ -1583,16 +1646,9 @@ async function doOptimize() {
     if(pending.length<2) { toast('Недостатньо точок'); return; }
 
     loading('Визначення позиції...');
-    let startLat, startLng;
-    try {
-        const pos = await getPos();
-        startLat=pos.lat; startLng=pos.lng;
-        if(!S.userLat) updateUserPos(startLat,startLng);
-    } catch(e) {
-        startLat = pending.reduce((s,p)=>s+p.lat,0)/pending.length;
-        startLng = pending.reduce((s,p)=>s+p.lng,0)/pending.length;
-        toast('GPS недоступний, оптимізація від центру');
-    }
+    const pos = await getPos(); // always returns — GPS or warehouse fallback
+    const startLat = pos.lat, startLng = pos.lng;
+    if(!S.userLat) toast(`📍 GPS недоступний — маршрут від ${WAREHOUSE.name}`);
 
     const orsKey = getOrsKey();
     let optimized;
@@ -2089,6 +2145,14 @@ async function pushDbJsToGitHub(jsContent) {
     }
 }
 
+// Auto-draw route from warehouse through all points on load
+async function autoDrawRoute() {
+    const pts = S.routePoints.filter(p => p.hasCoords && !p.done);
+    if(pts.length < 1) return;
+    const startLat = WAREHOUSE.lat, startLng = WAREHOUSE.lng;
+    await drawOptRoute(startLat, startLng, pts);
+}
+
 async function init() {
     initMap();
 
@@ -2105,6 +2169,12 @@ async function init() {
         document.getElementById('db-status').textContent = 'Помилка завантаження бази';
         document.getElementById('db-count').textContent  = 'Зверніться до адміністратора';
     }
+
+    // Auto-start GPS tracking
+    startGPSAuto();
+
+    // Show warehouse marker on map
+    showWarehouseMarker();
 
     // Restore saved route
     if(!restoreRouteFromStorage()) {
