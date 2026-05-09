@@ -1242,28 +1242,37 @@ function buildGeoQuery(addrRaw) {
 }
 
 async function geocodeMissing(pts) {
+    if(!navigator.onLine) {
+        toast(`⚠️ Офлайн — ${pts.length} адрес без координат`);
+        return;
+    }
     let geocoded = 0;
-    for(const p of pts) {
+    toast(`🔍 Геокодування: 0 з ${pts.length}...`);
+    for(let i = 0; i < pts.length; i++) {
+        const p = pts[i];
         const query = buildGeoQuery(p.addrRaw);
+        console.log(`Geocoding [${i+1}/${pts.length}]:`, query);
         const coords = await geocodeAddr(query);
         if(coords) {
             p.lat = coords.lat;
             p.lng = coords.lng;
             p.hasCoords = true;
-            p.geocoded = true; // yellow marker flag
+            p.geocoded = true;
             geocoded++;
-            // Add marker immediately as it's found
             addGeocodedMarker(p);
             updateStats();
+            toast(`🔍 Геокодування: ${geocoded} знайдено (${i+1}/${pts.length})`);
+        } else {
+            console.warn(`Not found [${i+1}/${pts.length}]:`, query);
         }
-        // Nominatim rate limit — max 1 req/sec
-        await new Promise(r => setTimeout(r, 1100));
+        // Nominatim rate limit — 1 req/sec
+        await new Promise(r => setTimeout(r, 1200));
     }
+    renderRouteUI();
     if(geocoded > 0) {
-        renderRouteUI();
         toast(`📍 Знайдено на мапі: ${geocoded} з ${pts.length} адрес`);
-    } else if(pts.length > 0) {
-        toast(`⚠️ ${pts.length} адрес не знайдено на мапі`);
+    } else {
+        toast(`⚠️ Жодну адресу не знайдено. Перевірте інтернет.`);
     }
 }
 
@@ -1277,26 +1286,33 @@ function addGeocodedMarker(p) {
     S.routeMarkers.push(m);
 }
 
-// Geocode via Nominatim — bounded to Odesa oblast bounding box
-// Odesa oblast bounds: lat 45.1–47.6, lon 28.9–32.1
-const ODESA_VIEWBOX = '28.9,47.6,32.1,45.1'; // left,top,right,bottom
-
+// Geocode via Nominatim — 3 fallback strategies
 async function geocodeAddr(query) {
-    try {
-        const q = encodeURIComponent(query);
-        // First try: bounded search within Odesa oblast
-        const urlBounded = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&accept-language=uk&countrycodes=ua&viewbox=${ODESA_VIEWBOX}&bounded=1`;
-        const dataBounded = await (await fetch(urlBounded)).json();
-        if (dataBounded && dataBounded[0]) {
-            return { lat: parseFloat(dataBounded[0].lat), lng: parseFloat(dataBounded[0].lon) };
+    const base = 'https://nominatim.openstreetmap.org/search';
+    const opts = '&format=json&limit=1&accept-language=uk';
+
+    const urls = [
+        // 1. Ukraine only
+        `${base}?q=${encodeURIComponent(query)}${opts}&countrycodes=ua`,
+        // 2. No country filter (for edge cases)
+        `${base}?q=${encodeURIComponent(query)}${opts}`,
+    ];
+
+    for(const url of urls) {
+        try {
+            const res = await fetch(url);
+            if(!res.ok) { console.warn('Nominatim HTTP', res.status, url); continue; }
+            const data = await res.json();
+            if(data && data[0]) {
+                console.log('Geocoded:', query, '→', data[0].lat, data[0].lon, data[0].display_name);
+                return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+            }
+            console.warn('Nominatim no result for:', query);
+        } catch(e) {
+            console.error('Nominatim fetch error:', e.message, url);
         }
-        // Second try: unbounded but still Ukraine only
-        const urlUA = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&accept-language=uk&countrycodes=ua`;
-        const dataUA = await (await fetch(urlUA)).json();
-        if (dataUA && dataUA[0]) {
-            return { lat: parseFloat(dataUA[0].lat), lng: parseFloat(dataUA[0].lon) };
-        }
-    } catch(e) {}
+        await new Promise(r => setTimeout(r, 500));
+    }
     return null;
 }
 
