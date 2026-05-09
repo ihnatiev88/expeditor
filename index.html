@@ -1286,32 +1286,41 @@ function addGeocodedMarker(p) {
     S.routeMarkers.push(m);
 }
 
-// Geocode via Nominatim — 3 fallback strategies
+// Transliterate Russian street names to Ukrainian for Nominatim
+function ruToUk(q) {
+    return q
+        .replace(/(?<![\u0430-\u044f\u0410-\u042f\u0406\u0456\u0407\u0457\u0404\u0454])\u0443\u043b\.?\s*/g, '\u0432\u0443\u043b.')
+        .replace(/(?<![\u0430-\u044f\u0410-\u042f\u0406\u0456\u0407\u0457\u0404\u0454])\u043f\u0435\u0440\.?\s*/g, '\u043f\u0440\u043e\u0432.')
+        .replace(/\u043e\u0432(?=[,\s\d]|$)/gi, '\u0456\u0432')
+        .replace(/\u0435\u0432(?=[,\s\d]|$)/gi, '\u0454\u0432')
+        .replace(/\u0430\u044f(?=[,\s\d]|$)/gi, '\u0430')
+        .replace(/\u044b/g, '\u0438')
+        .replace(/\u044a/g, '')
+        .replace(/\u0451/g, '\u0439\u043e');
+}
+
+// Geocode via Nominatim — with RU→UK fallback
 async function geocodeAddr(query) {
     const base = 'https://nominatim.openstreetmap.org/search';
-    const opts = '&format=json&limit=1&accept-language=uk';
+    const opts = '&format=json&limit=1&accept-language=uk&countrycodes=ua';
 
-    const urls = [
-        // 1. Ukraine only
-        `${base}?q=${encodeURIComponent(query)}${opts}&countrycodes=ua`,
-        // 2. No country filter (for edge cases)
-        `${base}?q=${encodeURIComponent(query)}${opts}`,
-    ];
+    const ukQuery = ruToUk(query);
+    const queries = ukQuery !== query ? [query, ukQuery] : [query];
 
-    for(const url of urls) {
+    for(const q of queries) {
         try {
-            const res = await fetch(url);
-            if(!res.ok) { console.warn('Nominatim HTTP', res.status, url); continue; }
+            const res = await fetch(`${base}?q=${encodeURIComponent(q)}${opts}`);
+            if(!res.ok) { console.warn('Nominatim HTTP', res.status); continue; }
             const data = await res.json();
             if(data && data[0]) {
-                console.log('Geocoded:', query, '→', data[0].lat, data[0].lon, data[0].display_name);
+                console.log('Geocoded:', q, '\u2192', data[0].lat, data[0].lon);
                 return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
             }
-            console.warn('Nominatim no result for:', query);
+            console.warn('Nominatim no result for:', q);
         } catch(e) {
-            console.error('Nominatim fetch error:', e.message, url);
+            console.error('Nominatim error:', e.message);
         }
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 600));
     }
     return null;
 }
