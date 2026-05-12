@@ -1,4 +1,4 @@
-const CACHE = 'expeditor-v2';
+const CACHE = 'expeditor-v3';
 const STATIC = [
     './',
     './index.html',
@@ -9,38 +9,45 @@ const STATIC = [
     'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap'
 ];
 
-// These domains must NEVER be intercepted — always go straight to network
+// Domains that must NEVER be intercepted — pass straight to network
 const NETWORK_ONLY = [
     'nominatim.openstreetmap.org',
     'router.project-osrm.org',
     'api.openrouteservice.org',
     'api.github.com',
-    'api.jsonbin.io'
+    'api.jsonbin.io',
+    'fonts.googleapis.com',
+    'fonts.gstatic.com'
 ];
 
 self.addEventListener('install', e => {
     e.waitUntil(
-        caches.open(CACHE).then(c => c.addAll(STATIC)).then(() => self.skipWaiting())
+        caches.open(CACHE)
+            .then(c => c.addAll(STATIC))
+            .then(() => self.skipWaiting())
     );
 });
 
 self.addEventListener('activate', e => {
     e.waitUntil(
-        caches.keys().then(keys =>
-            Promise.all(keys.filter(k => k !== CACHE && k !== 'tiles-v1').map(k => caches.delete(k)))
-        ).then(() => self.clients.claim())
+        caches.keys()
+            .then(keys => Promise.all(
+                keys.filter(k => k !== CACHE && k !== 'tiles-v1')
+                    .map(k => caches.delete(k))
+            ))
+            .then(() => self.clients.claim())
     );
 });
 
 self.addEventListener('fetch', e => {
     const url = e.request.url;
 
-    // Network-only APIs — never cache, never intercept
+    // Never intercept API calls — let browser handle directly
     if (NETWORK_ONLY.some(domain => url.includes(domain))) {
-        return; // let browser handle directly
+        return;
     }
 
-    // OSM map tiles — cache-first (offline maps)
+    // OSM tiles — cache first
     if (url.includes('tile.openstreetmap.org')) {
         e.respondWith(
             caches.open('tiles-v1').then(async cache => {
@@ -58,7 +65,7 @@ self.addEventListener('fetch', e => {
         return;
     }
 
-    // Static assets — cache first, clone BEFORE consuming
+    // Static assets — cache first, fallback to network
     e.respondWith(
         caches.match(e.request).then(cached => {
             if (cached) return cached;

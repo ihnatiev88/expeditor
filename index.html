@@ -281,6 +281,9 @@ html, body { height:100%; font-family:'Barlow',sans-serif; background:var(--bg);
 }
 .inv-pill.red { background:rgba(239,68,68,.12); color:var(--danger); border-color:rgba(239,68,68,.2); }
 .inv-pill.yellow { background:rgba(234,179,8,.12); color:#eab308; border-color:rgba(234,179,8,.2); }
+.inv-pill.pko { background:rgba(22,163,74,.12); color:#16a34a; border-color:rgba(22,163,74,.2); font-weight:700; }
+.inv-pko { color:#16a34a; font-weight:700; font-size:11px; }
+.ppop-pko { background:rgba(22,163,74,.1); border:1px solid rgba(22,163,74,.25); border-radius:8px; padding:6px 10px; margin:6px 0 8px; font-size:13px; color:#16a34a; }
 
 .inv-list {
     margin:5px 0 3px; padding:6px 8px;
@@ -995,6 +998,10 @@ function mkPopup(name, address, lat, lng, invoices, pointIdx) {
            </div>`
         : '';
 
+    const pkoTotal = invoices && invoices.reduce ? invoices.reduce((s,inv)=>s+(inv.pkoSum||0),0) : 0;
+    const pkoHtml = pkoTotal > 0
+        ? `<div class="ppop-pko">💵 Інкасація: <b>${pkoTotal.toFixed(2)} грн</b></div>`
+        : '';
     const isDone = (pointIdx !== undefined) && S.routePoints[pointIdx]?.done;
     const doneBtn = (pointIdx !== undefined)
         ? `<button class="ppop-btn ${isDone?'ppop-done-on':'ppop-done'}" onclick="toggleDonePopup(${pointIdx})">
@@ -1009,6 +1016,7 @@ function mkPopup(name, address, lat, lng, invoices, pointIdx) {
             <div class="ppop-name">${esc2(name)}</div>
             <div class="ppop-addr">${esc2(address)}</div>
             ${invHtml}
+            ${pkoHtml}
             <div class="ppop-btns">
                 <button class="ppop-btn main" onclick="navTo(${lat},${lng})">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
@@ -1119,8 +1127,10 @@ async function loadRoute(input) {
             const addrRaw = String(r[25]).trim();
             const weight  = r[37] ? parseFloat(r[37])||0 : 0;
             const ttn     = r[1]  ? String(r[1]).trim()  : '';
+            const pkoNum  = r[44] ? String(r[44]).trim() : '';
+            const pkoSum  = r[45] ? parseFloat(r[45])||0 : 0;
             const addr    = parseAddr(addrRaw);
-            rawRows.push({ partner, addrRaw, address:addr, weight, ttn });
+            rawRows.push({ partner, addrRaw, address:addr, weight, ttn, pkoNum, pkoSum });
         }
 
         // GROUP by client + address
@@ -1141,13 +1151,14 @@ async function loadRoute(input) {
                 });
             }
             const g = groups.get(key);
-            g.invoices.push({ ttn: row.ttn, weight: row.weight });
+            g.invoices.push({ ttn: row.ttn, weight: row.weight, pkoNum: row.pkoNum, pkoSum: row.pkoSum });
         }
 
         const pts = Array.from(groups.values());
         // compute totals
         pts.forEach(p => {
             p.totalWeight   = p.invoices.reduce((s,inv) => s + inv.weight, 0);
+            p.totalPko      = p.invoices.reduce((s,inv) => s + (inv.pkoSum||0), 0);
             p.invoiceCount  = p.invoices.length;
         });
 
@@ -1210,32 +1221,31 @@ function parseAddr(raw) {
 // Build a geocoding query: settlement, street, house number
 // Default city — м. Одеса if no settlement found in address
 function buildGeoQuery(addrRaw) {
-    const parts = addrRaw.split(' - ', 1);  // intentional: split only first " - "
-    // actually split on first occurrence
     const dashIdx = addrRaw.indexOf(' - ');
     let loc = dashIdx >= 0 ? addrRaw.slice(dashIdx + 3).trim() : addrRaw.trim();
 
     // 1. Clean noise
     loc = loc.replace(/Одеськ[а-я]+\s+(рн|район)[,\s]*/gi, '');
-    loc = loc.replace(/\bОдес[аи]\s+(?=м\.)/gi, '');   // "Одеса м.Одеса" → "м.Одеса"
-    loc = loc.replace(/ОДЕСС?А\.?(?=\s*м\.)/g, '');     // "ОДЕССА м." → "м."
-    loc = loc.replace(/^ОДЕСС?А[,.\s]+/gi, '');            // leading ОДЕССА
+    loc = loc.replace(/\bОдес[аи]\s+(?=м\.)/gi, '');
+    loc = loc.replace(/ОДЕСС?А\.?(?=\s*м\.)/g, '');
+    loc = loc.replace(/^ОДЕСС?А[,.\s]+/gi, '');
     loc = loc.replace(/\s{2,}/g, ' ').trim().replace(/^[,\s]+/, '').trim();
 
-    // 2. Find settlement: м./с./смт. + Name (words starting with UPPERCASE only)
+    // 2. Find settlement (м./с./смт. + uppercase Name)
     const settleM = loc.match(/\b([смСМ](?:мт)?\.?\s*[А-ЯІЇЄ][А-ЯІЇЄа-яіїє\'-]+(?:\s+[А-ЯІЇЄ][А-ЯІЇЄа-яіїє\'-]+)?)/);
     const settlement = settleM ? settleM[1].trim() : 'м. Одеса';
 
-    // 3. Street + house = everything after settlement
+    // 3. Street+house = after settlement
     let rest = '';
     if(settleM) {
         rest = loc.slice(settleM.index + settleM[0].length).trim().replace(/^[.,]+/, '').trim();
-        // Remove duplicate last word of settlement at start of rest
         const lastWord = settlement.split(/\s+/).pop().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         rest = rest.replace(new RegExp('^' + lastWord + '\\b\\s*[,.]?\\s*', 'i'), '').trim();
     } else {
         rest = loc.replace(/^Одес[аи]\b[,\s]*/i, '').trim();
     }
+    // Remove any remaining м.Одеса duplicate at start of rest
+    rest = rest.replace(/^м\.?\s*Одес[аи][,\s]*/i, '').trim();
     rest = rest.replace(/\s{2,}/g, ' ').trim().replace(/^[.,]+/, '').trim();
 
     return settlement + (rest ? ', ' + rest : '') + ', Україна';
@@ -1443,13 +1453,17 @@ function renderRouteUI() {
                 <div class="rc-inv-row">
                     <span class="inv-pill">📦 ${p.invoiceCount} накл.</span>
                     ${p.totalWeight?`<span class="inv-pill">⚖️ ${p.totalWeight.toFixed(1)} кг</span>`:''}
+                    ${p.totalPko?`<span class="inv-pill pko">💵 ${p.totalPko.toFixed(2)} грн</span>`:''}
                     ${!p.hasCoords?`<span class="inv-pill red">без координат</span>`:p.geocoded?`<span class="inv-pill yellow">📍 мапа</span>`:''}
                 </div>
                 <div class="inv-list" id="invlist${i}">
                     ${p.invoices.map(inv=>`
                         <div class="inv-item">
                             <span class="inv-ttn">${esc2(inv.ttn||'—')}</span>
-                            ${inv.weight?`<span class="inv-wt">${inv.weight.toFixed(1)} кг</span>`:''}
+                            <span style="display:flex;gap:6px;align-items:center">
+                                ${inv.weight?`<span class="inv-wt">${inv.weight.toFixed(1)} кг</span>`:''}
+                                ${inv.pkoSum?`<span class="inv-pko">💵 ${inv.pkoSum.toFixed(2)}</span>`:''}
+                            </span>
                         </div>`).join('')}
                 </div>
                 <div class="rcactions">
@@ -1499,7 +1513,8 @@ function putMarkersOnMap() {
 
     allValid.forEach((p, idx) => {
         const num = S.routePoints.indexOf(p)+1;
-        const color = p.done ? '#22c55e' : (p.geocoded ? '#eab308' : '#f97316');
+        const hasPko = p.totalPko > 0;
+        const color = p.done ? '#22c55e' : (p.geocoded ? '#eab308' : (hasPko ? '#16a34a' : '#f97316'));
         const lbl   = p.done ? '✓' : String(num);
         const icon  = pinIcon(color, lbl);
 
