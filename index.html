@@ -1309,24 +1309,54 @@ function ruToUk(q) {
         .replace(/\u0451/g, '\u0439\u043e');
 }
 
-// Geocode via Nominatim — with RU→UK fallback
+// Expand street abbreviations for Nominatim
+function expandStreet(s) {
+    return s
+        .replace(/^\u0432\u0443\u043b\.?\s*/i, '\u0432\u0443\u043b\u0438\u0446\u044f ')
+        .replace(/^\u043f\u0440\u043e\u0441\u043f?\.?\s*/i, '\u043f\u0440\u043e\u0441\u043f\u0435\u043a\u0442 ')
+        .replace(/^\u043f\u0440\.?\s*(?=[\u0410-\u042f\u0430-\u044f])/i, '\u043f\u0440\u043e\u0441\u043f\u0435\u043a\u0442 ')
+        .replace(/^\u043f\u0440\u043e\u0432\.?\s*/i, '\u043f\u0440\u043e\u0432\u0443\u043b\u043e\u043a ')
+        .replace(/^\u0431\u0443\u043b\.?\s*/i, '\u0431\u0443\u043b\u044c\u0432\u0430\u0440 ')
+        .replace(/^\u043f\u043b\.?\s*/i, '\u043f\u043b\u043e\u0449\u0430 ')
+        .replace(/^\u0431-\u0440\.?\s*/i, '\u0431\u0443\u043b\u044c\u0432\u0430\u0440 ')
+        .replace(/^\u043f\u0435\u0440\.?\s*/i, '\u043f\u0440\u043e\u0432\u0443\u043b\u043e\u043a ')
+        .replace(/^\u0443\u043b\.?\s*/i, '\u0432\u0443\u043b\u0438\u0446\u044f ');
+}
+
+// Geocode via Nominatim — structured query (more reliable than free text)
 async function geocodeAddr(query) {
     const base = 'https://nominatim.openstreetmap.org/search';
-    const opts = '&format=json&limit=1&accept-language=uk&countrycodes=ua';
 
-    const ukQuery = ruToUk(query);
-    const queries = ukQuery !== query ? [query, ukQuery] : [query];
+    // Parse query: "м. Одеса, вул.Дерибасівська, 16, Україна"
+    const parts = query.replace(/, Україна$/i, '').split(',').map(s => s.trim()).filter(Boolean);
 
-    for(const q of queries) {
+    // Strip м./с./смт. prefix from settlement for Nominatim
+    const rawSettlement = parts[0] || 'Одеса';
+    const city = rawSettlement.replace(/^[смСМ](?:мт)?\.?\s*/i, '').trim();
+
+    const streetRaw = parts.slice(1).join(', ');
+    const street    = expandStreet(streetRaw);
+    const ukQuery   = ruToUk(query);
+
+    const attempts = [
+        // 1. Structured: city + street (most precise)
+        `${base}?city=${encodeURIComponent(city)}&street=${encodeURIComponent(street)}&country=Ukraine&format=json&limit=1&accept-language=uk`,
+        // 2. Free-text with expanded abbreviations
+        `${base}?q=${encodeURIComponent(city + ', ' + street + ', Україна')}&format=json&limit=1&accept-language=uk&countrycodes=ua`,
+        // 3. Free-text Ukrainian (transliterated)
+        `${base}?q=${encodeURIComponent(ukQuery)}&format=json&limit=1&accept-language=uk&countrycodes=ua`,
+    ];
+
+    for(const url of attempts) {
         try {
-            const res = await fetch(`${base}?q=${encodeURIComponent(q)}${opts}`);
+            const res = await fetch(url);
             if(!res.ok) { console.warn('Nominatim HTTP', res.status); continue; }
             const data = await res.json();
             if(data && data[0]) {
-                console.log('Geocoded:', q, '\u2192', data[0].lat, data[0].lon);
+                console.log('Geocoded:', query, '\u2192', data[0].lat, data[0].lon, '|', data[0].display_name.slice(0,60));
                 return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
             }
-            console.warn('Nominatim no result for:', q);
+            console.warn('Nominatim no result for attempt:', attempts.indexOf(url)+1, city, '|', street);
         } catch(e) {
             console.error('Nominatim error:', e.message);
         }
